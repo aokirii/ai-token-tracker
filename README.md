@@ -152,8 +152,25 @@ python tracker.py
 
 ## Usage
 
-- Run `./run.sh`, or launch **AI Token Tracker** from your app menu (Linux).
-- Windows/macOS: `python tracker.py`.
+You only install once. To launch the app on later runs, you **don't** need to reinstall or activate
+the venv — just call the venv's Python directly from the project folder:
+
+- **Linux** — `./run.sh`, or launch **AI Token Tracker** from your app menu (registered by `install.sh`).
+- **macOS** — `.venv/bin/python tracker.py` (or `./run.sh`).
+- **Windows** — `.venv\Scripts\python tracker.py`
+
+Activating the venv first (`source .venv/bin/activate` / `.venv\Scripts\activate.bat`) is optional — it
+only lets you type the shorter `python tracker.py`.
+
+### Double-click launchers (no terminal)
+
+After the one-time install, you can start the app without a terminal:
+
+- **Windows** — double-click **`start.bat`** (runs with `pythonw`, so no console window appears).
+- **macOS** — double-click **`start.command`**. The first time, right-click it → **Open** to get past
+  Gatekeeper (it's an unsigned script); after that a normal double-click works.
+
+Both live in the project folder and just run the app from `.venv`.
 
 ## Configuration
 
