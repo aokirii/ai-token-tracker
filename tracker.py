@@ -17,6 +17,7 @@ import os
 import queue
 import shutil
 import sqlite3
+import ssl
 import subprocess
 import sys
 import threading
@@ -152,6 +153,19 @@ def _shape(fh, sd, origin):
     }
 
 
+def _ssl_context():
+    """certifi-backed CA bundle so HTTPS works on macOS python.org Python,
+    which otherwise fails with CERTIFICATE_VERIFY_FAILED (no local CA issuer)."""
+    try:
+        import certifi
+        return ssl.create_default_context(cafile=certifi.where())
+    except Exception:
+        return ssl.create_default_context()
+
+
+_SSL_CTX = _ssl_context()
+
+
 def claude_live():
     """Call Anthropic /api/oauth/usage directly. None on failure."""
     creds = _read_creds()
@@ -170,7 +184,7 @@ def claude_live():
         },
     )
     try:
-        with urllib.request.urlopen(req, timeout=12) as r:
+        with urllib.request.urlopen(req, timeout=12, context=_SSL_CTX) as r:
             d = json.load(r)
     except (urllib.error.URLError, OSError, ValueError):
         return None
