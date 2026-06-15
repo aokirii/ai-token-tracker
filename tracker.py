@@ -3,7 +3,7 @@
 
 Pulls Claude usage automatically:
   1. live: https://api.anthropic.com/api/oauth/usage (official 5h / 7d utilization %)
-  2. cache: ~/.tokentracker/tracker/claude-usage-limits-cache.json (written by tokentracker-cli)
+  2. cache: ~/.tokentracker/tracker/claude-usage-limits-cache.json
   3. jsonl: token estimate from ~/.claude/projects/**/*.jsonl
 Codex usage is pulled through the local Codex app-server and mirrored to YAML.
 Antigravity is manual for now (values come from config/config.yaml).
@@ -139,7 +139,7 @@ def _shape(fh, sd, origin):
 
 
 def claude_live():
-    """Call Anthropic /api/oauth/usage directly (same as tokentracker-cli). None on failure."""
+    """Call Anthropic /api/oauth/usage directly. None on failure."""
     creds = _read_creds()
     tok = creds.get("accessToken")
     exp = creds.get("expiresAt")
