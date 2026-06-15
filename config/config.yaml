@@ -1,0 +1,27 @@
+# Application / display settings (safe to share / commit).
+# For user-specific paths, see config/user.config.yaml
+
+window_hours: 5            # rolling window length (Claude Pro plan = 5h)
+refresh_seconds: 30        # how often the UI refreshes
+live_interval_seconds: 60  # lower bound for live API calls (network hit at most once per this)
+
+providers:
+  - id: claude
+    name: Claude
+    source: claude_auto      # automatic (live API -> cache -> jsonl)
+    limit: 1000000           # quota for manual providers; unused for claude_auto
+    color: "#d97757"
+
+  - id: codex
+    name: Codex
+    source: manual
+    used: 0
+    limit: 1000000
+    color: "#10a37f"
+
+  - id: antigravity
+    name: Antigravity
+    source: manual
+    used: 0
+    limit: 1000000
+    color: "#4285f4"

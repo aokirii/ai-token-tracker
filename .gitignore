@@ -1,0 +1,9 @@
+# User-specific settings (personal paths / names) — not shared
+config/user.config.yaml
+
+# Virtual environment
+.venv/
+
+# Python
+__pycache__/
+*.pyc

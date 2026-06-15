@@ -1,0 +1,11 @@
+# TEMPLATE. Copy this to 'user.config.yaml' and fill in your own values.
+# Paths support ~ which expands to your home directory.
+
+user:
+  name: <your-username>
+  home: <your-home-dir, e.g. /home/user>
+
+paths:
+  claude_credentials: ~/.claude/.credentials.json
+  claude_projects_glob: ~/.claude/projects/**/*.jsonl
+  claude_usage_cache: ~/.tokentracker/tracker/claude-usage-limits-cache.json
