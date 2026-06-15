@@ -69,6 +69,10 @@ cd ai-token-tracker
 
 ### Manual (Linux / macOS)
 
+First get into the project folder — after `git clone ... ai-token-tracker && cd ai-token-tracker`,
+or after unzipping the downloaded ZIP and `cd`-ing into the extracted folder (e.g.
+`cd ai-token-tracker-main`). From inside that folder (it contains `tracker.py`), run:
+
 ```bash
 python3 -m venv --system-site-packages .venv   # --system-site-packages is Linux-only (GTK/WebKit); drop it on macOS
 .venv/bin/pip install -r requirements.txt
@@ -78,12 +82,12 @@ cp config/user.config.example.yaml config/user.config.yaml
 
 ### Windows
 
-First install the prerequisites:
+Prerequisites: [Python 3.9+](https://www.python.org/downloads/) (tick **"Add python.exe to PATH"**)
+and the [WebView2 runtime](https://developer.microsoft.com/microsoft-edge/webview2/) (preinstalled on Windows 11).
 
-1. [Python 3.9+](https://www.python.org/downloads/) — during setup, tick **"Add python.exe to PATH"**.
-2. [WebView2 runtime](https://developer.microsoft.com/microsoft-edge/webview2/) — already present on Windows 11; install it on Windows 10.
-
-Then open **PowerShell** in the project folder and run the commands **one line at a time**:
+Get the project — clone with [Git](https://git-scm.com/download/win), or **Code → Download ZIP** and
+extract it. Then `cd` into that folder (`ai-token-tracker`, or `ai-token-tracker-main` from the ZIP) and,
+in **PowerShell**, run:
 
 ```powershell
 python -m venv .venv
@@ -92,24 +96,8 @@ copy config\user.config.example.yaml config\user.config.yaml
 .venv\Scripts\python tracker.py
 ```
 
-The app window should open on the last command.
-
-**Windows notes (this is where most errors come from):**
-
-- Use the Windows paths `.venv\Scripts\...` (backslashes). The Linux paths `./install.sh`, `./run.sh`,
-  `.venv/bin/...` and the `cp` command **do not exist on Windows** — running them is what produces
-  `command not found` / `is not recognized`.
-- Do **not** add `--system-site-packages`; that flag is only for Linux GTK and breaks the venv on Windows.
-- To avoid typing `.venv\Scripts\` each time, activate the venv first, then use plain `python`:
-  - PowerShell: `.venv\Scripts\Activate.ps1`
-  - Command Prompt: `.venv\Scripts\activate.bat`
-
-  ```powershell
-  .venv\Scripts\Activate.ps1
-  python tracker.py
-  ```
-  (If PowerShell blocks activation with a script-policy error, run once:
-  `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`.)
+Use the Windows `.venv\Scripts\...` paths — the `.sh` scripts and `.venv/bin/...` are POSIX-only — and
+don't pass `--system-site-packages`.
 
 ## Usage
 
