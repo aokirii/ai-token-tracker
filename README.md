@@ -56,39 +56,67 @@ This is **not Linux-only**. `pywebview` is cross-platform, and the data sources
 
 ## Installation
 
-### Linux / macOS (recommended)
+### Step 1 — Get the project (all platforms)
+
+Clone it with Git, or download it as a ZIP from GitHub (**Code → Download ZIP**) and extract:
 
 ```bash
-git clone <your-repo-url> ai-token-tracker
+git clone https://github.com/aokirii/ai-token-tracker.git ai-token-tracker
 cd ai-token-tracker
+```
+
+> Downloaded the ZIP instead of cloning? The extracted folder is named `ai-token-tracker-main`, so use
+> `cd ai-token-tracker-main`. You must be inside this folder (it contains `tracker.py`) for the steps below.
+
+No config file is required to run — the app uses sensible `~`-based defaults.
+
+### Step 2 — Set up for your OS
+
+Follow the one section that matches your system.
+
+#### Linux
+
+Prerequisite: WebKit2GTK (`gir1.2-webkit2-4.1` / `libwebkit2gtk-4.1`).
+
+Quickest — `install.sh` creates the venv, installs dependencies, and registers a GNOME app launcher:
+
+```bash
 ./install.sh
 ```
 
-`install.sh` creates a `.venv`, installs dependencies, copies the config template to
-`config/user.config.yaml`, and (on Linux) registers a desktop launcher.
-
-### Manual (Linux / macOS)
-
-First get into the project folder — after `git clone ... ai-token-tracker && cd ai-token-tracker`,
-or after unzipping the downloaded ZIP and `cd`-ing into the extracted folder (e.g.
-`cd ai-token-tracker-main`). From inside that folder (it contains `tracker.py`), run:
+Or do it manually:
 
 ```bash
-python3 -m venv --system-site-packages .venv   # --system-site-packages is Linux-only (GTK/WebKit); drop it on macOS
+python3 -m venv --system-site-packages .venv   # --system-site-packages pulls in the system GTK/WebKit
 .venv/bin/pip install -r requirements.txt
-cp config/user.config.example.yaml config/user.config.yaml
 .venv/bin/python tracker.py
 ```
 
-### Windows
+#### macOS
 
-Works in both **Command Prompt (cmd)** and **PowerShell** — only the activation step (2) differs.
+Uses the built-in WebKit (no extra runtime). The Claude token is read from the login Keychain — click
+**Always Allow** if macOS prompts — and the Codex.app binary is auto-detected.
 
-Prerequisites: [Python 3.9+](https://www.python.org/downloads/) (tick **"Add python.exe to PATH"**)
-and the [WebView2 runtime](https://developer.microsoft.com/microsoft-edge/webview2/) (preinstalled on Windows 11).
+Quickest:
 
-Get the project — clone with [Git](https://git-scm.com/download/win), or **Code → Download ZIP** and
-extract it — then `cd` into the folder (`ai-token-tracker`, or `ai-token-tracker-main` from the ZIP).
+```bash
+./install.sh
+```
+
+Or do it manually (note: **no** `--system-site-packages` on macOS):
+
+```bash
+python3 -m venv .venv
+.venv/bin/pip install -r requirements.txt
+.venv/bin/python tracker.py
+```
+
+#### Windows
+
+Prerequisites: [Python 3.9+](https://www.python.org/downloads/) (tick **"Add python.exe to PATH"**) and
+the [WebView2 runtime](https://developer.microsoft.com/microsoft-edge/webview2/) (preinstalled on
+Windows 11). The `.sh` installer is POSIX-only, so use the steps below. They work in both
+**Command Prompt (cmd)** and **PowerShell** — only the activation step (2) differs.
 
 **1. Create the virtual environment** (same in both shells):
 
@@ -118,12 +146,9 @@ pip install -r requirements.txt
 python tracker.py
 ```
 
-The app window opens on `python tracker.py`. No config file is needed — it uses sensible defaults. (To
-override paths, `copy config\user.config.example.yaml config\user.config.yaml` and edit it.)
-
 > Use backslashes `\` in Windows paths. In cmd, forward-slash paths like `.venv/Scripts/...` fail with
-> *"is not recognized"*, and the Linux `.venv/bin/...` paths and `.sh` scripts don't exist on Windows.
-> Don't pass `--system-site-packages` (Linux-only).
+> *"is not recognized"*, and the Linux `.venv/bin/...` paths don't exist on Windows. Don't pass
+> `--system-site-packages` (Linux-only).
 
 ## Usage
 
