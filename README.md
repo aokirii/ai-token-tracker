@@ -67,14 +67,49 @@ cd ai-token-tracker
 `install.sh` creates a `.venv`, installs dependencies, copies the config template to
 `config/user.config.yaml`, and (on Linux) registers a desktop launcher.
 
-### Manual / Windows
+### Manual (Linux / macOS)
 
 ```bash
-python3 -m venv --system-site-packages .venv   # omit --system-site-packages on Windows/macOS
-.venv/bin/pip install -r requirements.txt        # Windows: .venv\Scripts\pip
+python3 -m venv --system-site-packages .venv   # --system-site-packages is Linux-only (GTK/WebKit); drop it on macOS
+.venv/bin/pip install -r requirements.txt
 cp config/user.config.example.yaml config/user.config.yaml
-.venv/bin/python tracker.py                       # Windows: .venv\Scripts\python tracker.py
+.venv/bin/python tracker.py
 ```
+
+### Windows
+
+First install the prerequisites:
+
+1. [Python 3.9+](https://www.python.org/downloads/) — during setup, tick **"Add python.exe to PATH"**.
+2. [WebView2 runtime](https://developer.microsoft.com/microsoft-edge/webview2/) — already present on Windows 11; install it on Windows 10.
+
+Then open **PowerShell** in the project folder and run the commands **one line at a time**:
+
+```powershell
+python -m venv .venv
+.venv\Scripts\pip install -r requirements.txt
+copy config\user.config.example.yaml config\user.config.yaml
+.venv\Scripts\python tracker.py
+```
+
+The app window should open on the last command.
+
+**Windows notes (this is where most errors come from):**
+
+- Use the Windows paths `.venv\Scripts\...` (backslashes). The Linux paths `./install.sh`, `./run.sh`,
+  `.venv/bin/...` and the `cp` command **do not exist on Windows** — running them is what produces
+  `command not found` / `is not recognized`.
+- Do **not** add `--system-site-packages`; that flag is only for Linux GTK and breaks the venv on Windows.
+- To avoid typing `.venv\Scripts\` each time, activate the venv first, then use plain `python`:
+  - PowerShell: `.venv\Scripts\Activate.ps1`
+  - Command Prompt: `.venv\Scripts\activate.bat`
+
+  ```powershell
+  .venv\Scripts\Activate.ps1
+  python tracker.py
+  ```
+  (If PowerShell blocks activation with a script-policy error, run once:
+  `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`.)
 
 ## Usage
 
