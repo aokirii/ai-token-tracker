@@ -6,17 +6,18 @@ window with an HTML/CSS UI (no Electron).
 
 For Claude it pulls the **official** usage percentages (5-hour and 7-day rolling windows)
 straight from Anthropic, so what you see matches your plan limits — not a guess.
+For Codex it reads your local `~/.codex` login through the Codex app-server.
 
 ```
 AI Token Tracker
 ┌────────────────────────────────────────────────┐
 │ ● Claude  PRO                             27%    │
 │ ████████░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░ │
-│ 27% · 5h window                         7-day: 3%│
+│ 27% · 5h window                       18.6.26: 3%│
 │ resets in 4h 13m · live                          │
 ├────────────────────────────────────────────────┤
-│ ● Codex  PLUS                              0%    │
-│ 0 / 1,000,000 tokens                      manual │
+│ ● Codex  PLUS                             12%    │
+│ 12% · 5h window                      18.6.26: 4%│
 ├────────────────────────────────────────────────┤
 │ ● Antigravity  FREE                        0%    │
 └────────────────────────────────────────────────┘
@@ -25,8 +26,9 @@ AI Token Tracker
 ## Features
 
 - **Live Claude usage** — official 5h / 7d utilization % and exact reset time.
-- **Per-provider plan badge** next to each name — Claude's is auto-detected from your
-  credentials; the others are set in config.
+- **Live Codex usage** — Codex plan and rate-limit percentage from your local `~/.codex`
+  session.
+- **Per-provider plan badge** next to each name — Claude and Codex can be auto-detected.
 - **Auto-refresh** with a network throttle (the UI polls often, the API is hit at most
   once per minute).
 - **Graceful fallback chain**: live API → official local cache → token estimate from logs.
@@ -50,6 +52,7 @@ This is **not Linux-only**. `pywebview` is cross-platform, and the data sources
 - Dependencies in [`requirements.txt`](requirements.txt): `pywebview`, `PyYAML`
 - A platform webview backend (see the table above)
 - Claude Code logged in (provides `~/.claude/.credentials.json`) for live Claude data
+- Codex logged in (provides `~/.codex/auth.json`) for live Codex data
 
 ## Installation
 
@@ -89,13 +92,13 @@ All settings live under `config/` as YAML.
 | `window_hours` | Rolling window length (Claude Pro = 5h). |
 | `refresh_seconds` | How often the UI refreshes. |
 | `live_interval_seconds` | Minimum gap between live API calls. |
-| `providers[]` | Each provider's `name`, `color`, `source`, `plan`, and (for manual ones) `used` / `limit`. |
+| `providers[]` | Each provider's `name`, `color`, `source`, `plan`, and fallback `used` / `limit`. |
 
-`source` is either `claude_auto` (fetched automatically) or `manual` (you fill in `used`/`limit`).
+`source` is `claude_auto`, `codex_auto`, or `manual`.
 
-`plan` is the small badge shown next to the provider name. Use `auto` on `claude_auto` to
-detect it from your Claude credentials, or set a fixed label (e.g. `plus`, `free`) for the
-others.
+`plan` is the small badge shown next to the provider name. Use `auto` on `claude_auto` or
+`codex_auto` to detect it from local credentials, or set a fixed label (e.g. `plus`,
+`free`).
 
 ### `config/user.config.yaml` — user-specific (git-ignored)
 
@@ -110,6 +113,8 @@ paths:
   claude_credentials: ~/.claude/.credentials.json
   claude_projects_glob: ~/.claude/projects/**/*.jsonl
   claude_usage_cache: ~/.tokentracker/tracker/claude-usage-limits-cache.json
+  codex_home: ~/.codex
+  codex_binary: ""
 ```
 
 If this file is missing, the app falls back to the example template and then to the default
@@ -131,10 +136,19 @@ For Claude, data is resolved in priority order:
 The live call is throttled by `live_interval_seconds`, so frequent UI refreshes don't spam
 the endpoint.
 
+For Codex, data is resolved in priority order:
+
+1. **Live** — starts the local Codex app-server over stdio and reads `account/rateLimits/read`
+   plus `account/usage/read`.
+2. **Local fallback** — decodes the plan from `~/.codex/auth.json` and reads local
+   `state_5.sqlite` token totals when the app-server is unavailable.
+
+Codex usage is not written back to YAML; only the manual path and display settings live in
+the config files.
+
 ## Limitations
 
-- **Codex & Antigravity are manual** for now — set `used`/`limit` in `config.yaml`. (The same
-  approach could be wired to their usage endpoints later.)
+- **Antigravity is manual** for now — set `used`/`limit` in `config.yaml`.
 - Live Claude data stops when the OAuth token expires; run `claude` once to refresh it, and the
   app falls back to the cache in the meantime.
 - The `.desktop` launcher uses an absolute path; if you move the project, re-run `install.sh`.

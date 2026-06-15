@@ -8,17 +8,17 @@ live_interval_seconds: 60  # lower bound for live API calls (network hit at most
 providers:
   - id: claude
     name: Claude
-    source: claude_auto      # automatic (live API -> cache -> jsonl)
+    source: claude_auto      # automatic: live API, cache, jsonl
     plan: auto               # 'auto' = detect from credentials; or set a fixed label
     limit: 1000000           # quota for manual providers; unused for claude_auto
     color: "#d97757"
 
   - id: codex
     name: Codex
-    source: manual
-    plan: plus               # your Codex/ChatGPT plan label (free / plus / pro / team ...)
+    source: codex_auto       # automatic: Codex app-server, local auth/state fallback
+    plan: auto               # 'auto' = detect from ~/.codex auth; or set a fixed label
     used: 0
-    limit: 1000000
+    limit: 100
     color: "#10a37f"
 
   - id: antigravity

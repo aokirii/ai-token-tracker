@@ -2,16 +2,23 @@
 """AI Token Tracker — desktop panel.
 
 Pulls Claude usage automatically:
-  1. live   -> https://api.anthropic.com/api/oauth/usage (official 5h / 7d utilization %)
-  2. cache  -> ~/.tokentracker/tracker/claude-usage-limits-cache.json (written by tokentracker-cli)
-  3. jsonl  -> token estimate from ~/.claude/projects/**/*.jsonl
-Codex / Antigravity are manual for now (values come from config/config.yaml).
+  1. live: https://api.anthropic.com/api/oauth/usage (official 5h / 7d utilization %)
+  2. cache: ~/.tokentracker/tracker/claude-usage-limits-cache.json (written by tokentracker-cli)
+  3. jsonl: token estimate from ~/.claude/projects/**/*.jsonl
+Codex usage is pulled through the local Codex app-server and mirrored to YAML.
+Antigravity is manual for now (values come from config/config.yaml).
 The UI opens as a real desktop window via pywebview.
 """
 
-import json
+import base64
 import glob
+import json
 import os
+import queue
+import shutil
+import sqlite3
+import subprocess
+import threading
 import time
 import urllib.request
 import urllib.error
@@ -29,6 +36,8 @@ _DEFAULT_PATHS = {
     "claude_credentials": "~/.claude/.credentials.json",
     "claude_projects_glob": "~/.claude/projects/**/*.jsonl",
     "claude_usage_cache": "~/.tokentracker/tracker/claude-usage-limits-cache.json",
+    "codex_home": "~/.codex",
+    "codex_binary": "",
 }
 
 
@@ -53,9 +62,21 @@ def _load_user_config():
 
 _USER_CFG = _load_user_config()
 _paths = {**_DEFAULT_PATHS, **_USER_CFG.get("paths", {})}
+
+
+def _resolve_path(path):
+    expanded = os.path.expanduser(path)
+    if os.path.isabs(expanded):
+        return expanded
+    return os.path.join(BASE_DIR, expanded)
+
+
 CLAUDE_GLOB = os.path.expanduser(_paths["claude_projects_glob"])
 CLAUDE_CACHE = os.path.expanduser(_paths["claude_usage_cache"])
 CLAUDE_CREDS = os.path.expanduser(_paths["claude_credentials"])
+CODEX_HOME = _resolve_path(_paths["codex_home"])
+CODEX_AUTH = os.path.join(CODEX_HOME, "auth.json")
+CODEX_STATE_DB = os.path.join(CODEX_HOME, "state_5.sqlite")
 
 
 def load_config():
@@ -75,6 +96,19 @@ def _minutes_until(ts_str):
     dt = _parse_ts(ts_str)
     if dt is None:
         return None
+    return max(0, int((dt - datetime.now(timezone.utc)).total_seconds() // 60))
+
+
+def _minutes_until_epoch(value):
+    if value in (None, ""):
+        return None
+    try:
+        ts = float(value)
+    except (TypeError, ValueError):
+        return None
+    if ts > 10_000_000_000:
+        ts = ts / 1000
+    dt = datetime.fromtimestamp(ts, timezone.utc)
     return max(0, int((dt - datetime.now(timezone.utc)).total_seconds() // 60))
 
 
@@ -98,6 +132,7 @@ def _shape(fh, sd, origin):
         "pct": fh.get("utilization", 0),
         "resets_in": _minutes_until(fh.get("resets_at")),
         "seven_day_pct": (sd or {}).get("utilization"),
+        "seven_day_resets_at": (sd or {}).get("resets_at"),
         "seven_day_resets_in": _minutes_until((sd or {}).get("resets_at")),
         "origin": origin,
     }
@@ -111,7 +146,7 @@ def claude_live():
     if not tok:
         return None
     if exp and int(exp) / 1000 <= datetime.now(timezone.utc).timestamp():
-        return None  # token expired -> fall back to cache
+        return None  # token expired: fall back to cache
     req = urllib.request.Request(
         "https://api.anthropic.com/api/oauth/usage",
         headers={
@@ -216,6 +251,231 @@ def _fmt_tokens(n):
     return f"{n:,}"
 
 
+def _fmt_window(minutes):
+    if not minutes:
+        return "rate window"
+    h, m = divmod(int(minutes), 60)
+    if h and not m:
+        return f"{h}h window"
+    if h:
+        return f"{h}h {m}m window"
+    return f"{m}m window"
+
+
+def _fmt_date_epoch(value):
+    if value in (None, ""):
+        return ""
+    try:
+        ts = float(value)
+    except (TypeError, ValueError):
+        return ""
+    if ts > 10_000_000_000:
+        ts = ts / 1000
+    dt = datetime.fromtimestamp(ts, timezone.utc)
+    return f"{dt.day}.{dt.month}.{dt.strftime('%y')}"
+
+
+def _fmt_date_ts(value):
+    dt = _parse_ts(value)
+    if dt is None:
+        return ""
+    return f"{dt.day}.{dt.month}.{dt.strftime('%y')}"
+
+
+def _jwt_payload(token):
+    parts = (token or "").split(".")
+    if len(parts) < 2:
+        return {}
+    payload = parts[1] + "=" * ((4 - len(parts[1]) % 4) % 4)
+    try:
+        return json.loads(base64.urlsafe_b64decode(payload))
+    except (ValueError, TypeError):
+        return {}
+
+
+def _codex_auth():
+    try:
+        return json.load(open(CODEX_AUTH, encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+
+
+def codex_plan_from_auth():
+    tokens = (_codex_auth().get("tokens") or {})
+    for key in ("access_token", "id_token"):
+        auth_claims = _jwt_payload(tokens.get(key)).get("https://api.openai.com/auth") or {}
+        plan = auth_claims.get("chatgpt_plan_type")
+        if plan:
+            return plan
+    return None
+
+
+def _codex_binary():
+    configured = _paths.get("codex_binary")
+    if configured:
+        path = _resolve_path(configured)
+        return path if os.path.exists(path) else configured
+    candidates = glob.glob(os.path.join(CODEX_HOME, "packages/standalone/releases/*/bin/codex"))
+    if candidates:
+        return max(candidates, key=os.path.getmtime)
+    return shutil.which("codex")
+
+
+def _stream_reader(stream, label, out):
+    try:
+        for line in iter(stream.readline, ""):
+            out.put((label, line))
+    except (OSError, ValueError):
+        pass
+
+
+def _codex_rpc(timeout=18):
+    codex = _codex_binary()
+    if not codex:
+        return {}
+    requests = [
+        {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "initialize",
+            "params": {
+                "clientInfo": {"name": "token-tracker", "version": "0.1"},
+                "capabilities": {"experimentalApi": True},
+            },
+        },
+        {"jsonrpc": "2.0", "id": 2, "method": "account/read", "params": {"refreshToken": False}},
+        {"jsonrpc": "2.0", "id": 3, "method": "account/rateLimits/read", "params": None},
+        {"jsonrpc": "2.0", "id": 4, "method": "account/usage/read", "params": None},
+    ]
+    proc = None
+    try:
+        proc = subprocess.Popen(
+            [codex, "app-server", "--stdio"],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            bufsize=1,
+        )
+        lines = queue.Queue()
+        for label, stream in (("stdout", proc.stdout), ("stderr", proc.stderr)):
+            threading.Thread(target=_stream_reader, args=(stream, label, lines), daemon=True).start()
+        for req in requests:
+            proc.stdin.write(json.dumps(req) + "\n")
+            proc.stdin.flush()
+        results = {}
+        deadline = time.time() + timeout
+        while time.time() < deadline and len(results) < len(requests):
+            try:
+                label, line = lines.get(timeout=max(0.1, min(0.5, deadline - time.time())))
+            except queue.Empty:
+                continue
+            if label != "stdout":
+                continue
+            try:
+                msg = json.loads(line)
+            except ValueError:
+                continue
+            req_id = msg.get("id")
+            if req_id is not None:
+                results[req_id] = msg.get("result")
+        return results
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return {}
+    finally:
+        if proc and proc.poll() is None:
+            proc.terminate()
+            try:
+                proc.wait(timeout=2)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+
+
+def _codex_local_tokens():
+    if not os.path.exists(CODEX_STATE_DB):
+        return None
+    try:
+        con = sqlite3.connect(f"file:{CODEX_STATE_DB}?mode=ro", uri=True)
+        row = con.execute("select coalesce(sum(tokens_used), 0) from threads").fetchone()
+        return int(row[0] or 0)
+    except (OSError, sqlite3.Error, TypeError, ValueError):
+        return None
+
+
+def _codex_snapshot_from_rpc(results):
+    account = ((results.get(2) or {}).get("account") or {})
+    rate = results.get(3) or {}
+    usage = results.get(4) or {}
+    by_id = rate.get("rateLimitsByLimitId") or {}
+    snap = by_id.get("codex") or rate.get("rateLimits") or {}
+    primary = snap.get("primary") or {}
+    secondary = snap.get("secondary") or {}
+    summary = usage.get("summary") or {}
+    plan = snap.get("planType") or account.get("planType") or codex_plan_from_auth()
+    pct = primary.get("usedPercent")
+    if pct is None:
+        pct = 0
+    return {
+        "plan": plan,
+        "pct": pct,
+        "origin": "live",
+        "limit_id": snap.get("limitId") or "codex",
+        "limit_name": snap.get("limitName"),
+        "primary": {
+            "used_percent": primary.get("usedPercent"),
+            "resets_at": primary.get("resetsAt"),
+            "resets_in": _minutes_until_epoch(primary.get("resetsAt")),
+            "window_duration_mins": primary.get("windowDurationMins"),
+        },
+        "secondary": {
+            "used_percent": secondary.get("usedPercent"),
+            "resets_at": secondary.get("resetsAt"),
+            "resets_in": _minutes_until_epoch(secondary.get("resetsAt")),
+            "window_duration_mins": secondary.get("windowDurationMins"),
+        },
+        "usage": {
+            "lifetime_tokens": summary.get("lifetimeTokens"),
+        },
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+def _codex_fallback_snapshot():
+    plan = codex_plan_from_auth()
+    tokens = _codex_local_tokens()
+    if not plan and tokens is None:
+        return None
+    return {
+        "plan": plan,
+        "pct": 0,
+        "origin": "local",
+        "limit_id": "codex",
+        "limit_name": None,
+        "primary": {},
+        "secondary": {},
+        "usage": {"lifetime_tokens": tokens},
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+_codex_live = {"at": 0.0, "data": None}
+
+
+def codex_auto(min_interval):
+    now = time.time()
+    if now - _codex_live["at"] >= min_interval:
+        _codex_live["at"] = now
+        data = None
+        results = _codex_rpc()
+        if results.get(3):
+            data = _codex_snapshot_from_rpc(results)
+        if not data:
+            data = _codex_fallback_snapshot()
+        if data:
+            _codex_live["data"] = data
+    return _codex_live["data"]
+
+
 class Api:
     """Bridge exposed to the pywebview frontend."""
 
@@ -228,17 +488,20 @@ class Api:
             "providers": [],
         }
         for p in cfg.get("providers", []):
-            # Per-provider plan label. 'auto' (or missing) on claude_auto -> detect
+            # Per-provider plan label. 'auto' (or missing) on claude_auto: detect
             # from credentials; otherwise use the literal value from config.
+            source = p.get("source")
             plan = p.get("plan")
-            if p.get("source") == "claude_auto" and (plan in (None, "auto")):
+            if source == "claude_auto" and (plan in (None, "auto")):
                 plan = subscription_type()
+            elif source == "codex_auto" and (plan in (None, "auto")):
+                plan = codex_plan_from_auth()
             card = {
                 "name": p.get("name"),
                 "color": p.get("color", "#888"),
                 "plan": plan or "",
             }
-            if p.get("source") == "claude_auto":
+            if source == "claude_auto":
                 data = claude_auto(cfg.get("live_interval_seconds", 60))
                 if data:
                     note = "live" if data["origin"] == "live" else "cache (official)"
@@ -247,8 +510,10 @@ class Api:
                         pct=data["pct"],
                         primary=f"{data['pct']}% · {window_hours}h window",
                         sub=f"{sub} · {note}" if sub else note,
-                        extra=(f"7-day: {data['seven_day_pct']}%"
-                               if data["seven_day_pct"] is not None else ""),
+                        extra=(f"{_fmt_date_ts(data['seven_day_resets_at'])}: "
+                               f"{data['seven_day_pct']}%"
+                               if data["seven_day_pct"] is not None
+                               and _fmt_date_ts(data["seven_day_resets_at"]) else ""),
                         source=data["origin"],
                     )
                 else:
@@ -260,6 +525,38 @@ class Api:
                         primary=f"{_fmt_tokens(used)} / {_fmt_tokens(limit)} tokens",
                         sub=_fmt_reset(resets_in) or "estimate (no cache)",
                         extra="", source="jsonl",
+                    )
+            elif source == "codex_auto":
+                data = codex_auto(cfg.get("live_interval_seconds", 60))
+                if data:
+                    primary = data.get("primary") or {}
+                    secondary = data.get("secondary") or {}
+                    usage = data.get("usage") or {}
+                    pct = data.get("pct") or 0
+                    plan = data.get("plan") or card["plan"]
+                    reset = _fmt_reset(primary.get("resets_in"))
+                    window = _fmt_window(primary.get("window_duration_mins"))
+                    lifetime = usage.get("lifetime_tokens")
+                    secondary_date = _fmt_date_epoch(secondary.get("resets_at"))
+                    secondary_pct = secondary.get("used_percent")
+                    card.update(
+                        plan=plan or "",
+                        pct=pct,
+                        primary=f"{pct}% · {window}",
+                        sub=f"{reset} · {data['origin']}" if reset else data["origin"],
+                        extra=(f"{secondary_date}: {secondary_pct}%"
+                               if secondary_date and secondary_pct is not None
+                               else (f"lifetime: {_fmt_tokens(lifetime)}"
+                                     if lifetime is not None else "")),
+                        source=data["origin"],
+                    )
+                else:
+                    used, limit = p.get("used", 0), p.get("limit", 0) or 0
+                    pct = round(used / limit * 100, 1) if limit else 0
+                    card.update(
+                        pct=pct,
+                        primary=f"{_fmt_tokens(used)} / {_fmt_tokens(limit)} tokens",
+                        sub="codex unavailable", extra="", source="manual",
                     )
             else:
                 used, limit = p.get("used", 0), p.get("limit", 0) or 0
