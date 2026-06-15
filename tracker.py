@@ -350,15 +350,19 @@ def _codex_binary():
     found = shutil.which("codex")
     if found:
         return found
-    # Well-known locations not on PATH — notably the macOS Codex.app, where `codex`
-    # is only a shell alias that shutil.which can't see.
-    for p in (
+    # Well-known locations not on PATH — the macOS Codex.app (where `codex` is only a
+    # shell alias) and the Windows Codex install under %LOCALAPPDATA%.
+    localappdata = os.environ.get("LOCALAPPDATA", "")
+    candidates = [
         "/Applications/Codex.app/Contents/Resources/codex",
         os.path.expanduser("~/Applications/Codex.app/Contents/Resources/codex"),
         "/opt/homebrew/bin/codex",
         "/usr/local/bin/codex",
         os.path.expanduser("~/.codex/bin/codex"),
-    ):
+    ]
+    if localappdata:
+        candidates.append(os.path.join(localappdata, "OpenAI", "Codex", "bin", "codex.exe"))
+    for p in candidates:
         if os.path.exists(p):
             return p
     return None
