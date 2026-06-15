@@ -82,22 +82,48 @@ cp config/user.config.example.yaml config/user.config.yaml
 
 ### Windows
 
+Works in both **Command Prompt (cmd)** and **PowerShell** — only the activation step (2) differs.
+
 Prerequisites: [Python 3.9+](https://www.python.org/downloads/) (tick **"Add python.exe to PATH"**)
 and the [WebView2 runtime](https://developer.microsoft.com/microsoft-edge/webview2/) (preinstalled on Windows 11).
 
 Get the project — clone with [Git](https://git-scm.com/download/win), or **Code → Download ZIP** and
-extract it. Then `cd` into that folder (`ai-token-tracker`, or `ai-token-tracker-main` from the ZIP) and,
-in **PowerShell**, run:
+extract it — then `cd` into the folder (`ai-token-tracker`, or `ai-token-tracker-main` from the ZIP).
 
-```powershell
+**1. Create the virtual environment** (same in both shells):
+
+```bat
 python -m venv .venv
-.venv\Scripts\pip install -r requirements.txt
-copy config\user.config.example.yaml config\user.config.yaml
-.venv\Scripts\python tracker.py
 ```
 
-Use the Windows `.venv\Scripts\...` paths — the `.sh` scripts and `.venv/bin/...` are POSIX-only — and
-don't pass `--system-site-packages`.
+**2. Activate it** — use the line for your shell:
+
+```bat
+:: Command Prompt (cmd)
+.venv\Scripts\activate.bat
+```
+
+```powershell
+# PowerShell
+.venv\Scripts\Activate.ps1
+```
+
+Your prompt should now start with `(.venv)`. If PowerShell blocks the script with a policy error, run
+once `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`, then activate again.
+
+**3. Install and run** (same in both shells, with `(.venv)` active):
+
+```bat
+pip install -r requirements.txt
+python tracker.py
+```
+
+The app window opens on `python tracker.py`. No config file is needed — it uses sensible defaults. (To
+override paths, `copy config\user.config.example.yaml config\user.config.yaml` and edit it.)
+
+> Use backslashes `\` in Windows paths. In cmd, forward-slash paths like `.venv/Scripts/...` fail with
+> *"is not recognized"*, and the Linux `.venv/bin/...` paths and `.sh` scripts don't exist on Windows.
+> Don't pass `--system-site-packages` (Linux-only).
 
 ## Usage
 
