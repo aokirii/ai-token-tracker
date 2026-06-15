@@ -9,12 +9,14 @@ providers:
   - id: claude
     name: Claude
     source: claude_auto      # automatic (live API -> cache -> jsonl)
+    plan: auto               # 'auto' = detect from credentials; or set a fixed label
     limit: 1000000           # quota for manual providers; unused for claude_auto
     color: "#d97757"
 
   - id: codex
     name: Codex
     source: manual
+    plan: plus               # your Codex/ChatGPT plan label (free / plus / pro / team ...)
     used: 0
     limit: 1000000
     color: "#10a37f"
@@ -22,6 +24,7 @@ providers:
   - id: antigravity
     name: Antigravity
     source: manual
+    plan: free               # your Antigravity plan label
     used: 0
     limit: 1000000
     color: "#4285f4"

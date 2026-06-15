@@ -223,13 +223,21 @@ class Api:
         cfg = load_config()
         window_hours = cfg.get("window_hours", 5)
         out = {
-            "subscription": subscription_type(),
             "window_hours": window_hours,
             "refresh_seconds": cfg.get("refresh_seconds", 30),
             "providers": [],
         }
         for p in cfg.get("providers", []):
-            card = {"name": p.get("name"), "color": p.get("color", "#888")}
+            # Per-provider plan label. 'auto' (or missing) on claude_auto -> detect
+            # from credentials; otherwise use the literal value from config.
+            plan = p.get("plan")
+            if p.get("source") == "claude_auto" and (plan in (None, "auto")):
+                plan = subscription_type()
+            card = {
+                "name": p.get("name"),
+                "color": p.get("color", "#888"),
+                "plan": plan or "",
+            }
             if p.get("source") == "claude_auto":
                 data = claude_auto(cfg.get("live_interval_seconds", 60))
                 if data:

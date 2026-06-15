@@ -28,7 +28,6 @@
     margin-bottom: 18px;
   }
   header h1 { font-size: 16px; font-weight: 600; letter-spacing: .2px; }
-  header .win { font-size: 11px; color: var(--muted); }
 
   .card {
     background: var(--card);
@@ -64,6 +63,11 @@
     font-size: 9.5px; text-transform: uppercase; letter-spacing: .5px;
     padding: 2px 6px; border-radius: 5px; background: var(--track); color: var(--muted);
   }
+  .plan {
+    font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: .6px;
+    padding: 2px 6px; border-radius: 5px; margin-left: 8px;
+    background: rgba(255,255,255,.08); color: var(--muted);
+  }
   footer { text-align: center; font-size: 10.5px; color: var(--muted); margin-top: 8px; }
   .err { color: #e5645a; font-size: 12px; text-align: center; padding: 20px; }
 </style>
@@ -71,7 +75,6 @@
 <body>
   <header>
     <h1>AI Token Tracker</h1>
-    <span class="win" id="win"></span>
   </header>
   <div id="cards"></div>
   <footer id="foot"></footer>
@@ -84,17 +87,17 @@
   }
 
   function render(data) {
-    document.getElementById("win").textContent =
-      data.subscription ? data.subscription.toUpperCase() : "";
     const root = document.getElementById("cards");
     root.innerHTML = "";
     data.providers.forEach(p => {
       const pctShown = Math.min(p.pct, 100);
+      const plan = p.plan
+        ? `<span class="plan">${p.plan.toUpperCase()}</span>` : "";
       const card = document.createElement("div");
       card.className = "card";
       card.innerHTML = `
         <div class="row1">
-          <div class="name"><span class="dot" style="background:${p.color}"></span>${p.name}</div>
+          <div class="name"><span class="dot" style="background:${p.color}"></span>${p.name}${plan}</div>
           <div class="pct" style="color:${barColor(p.pct)}">${p.pct}%</div>
         </div>
         <div class="bar"><div class="fill" style="width:${pctShown}%;background:${barColor(p.pct)}"></div></div>
