@@ -8,23 +8,25 @@ For Claude it pulls the **official** usage percentages (5-hour and 7-day rolling
 straight from Anthropic, so what you see matches your plan limits — not a guess.
 
 ```
-AI Token Tracker                              PRO
+AI Token Tracker
 ┌────────────────────────────────────────────────┐
-│ ● Claude                                  27%    │
+│ ● Claude  PRO                             27%    │
 │ ████████░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░ │
 │ 27% · 5h window                         7-day: 3%│
 │ resets in 4h 13m · live                          │
 ├────────────────────────────────────────────────┤
-│ ● Codex                                    0%    │
+│ ● Codex  PLUS                              0%    │
 │ 0 / 1,000,000 tokens                      manual │
 ├────────────────────────────────────────────────┤
-│ ● Antigravity                              0%    │
+│ ● Antigravity  FREE                        0%    │
 └────────────────────────────────────────────────┘
 ```
 
 ## Features
 
 - **Live Claude usage** — official 5h / 7d utilization % and exact reset time.
+- **Per-provider plan badge** next to each name — Claude's is auto-detected from your
+  credentials; the others are set in config.
 - **Auto-refresh** with a network throttle (the UI polls often, the API is hit at most
   once per minute).
 - **Graceful fallback chain**: live API → official local cache → token estimate from logs.
@@ -87,9 +89,13 @@ All settings live under `config/` as YAML.
 | `window_hours` | Rolling window length (Claude Pro = 5h). |
 | `refresh_seconds` | How often the UI refreshes. |
 | `live_interval_seconds` | Minimum gap between live API calls. |
-| `providers[]` | Each provider's `name`, `color`, `source`, and (for manual ones) `used` / `limit`. |
+| `providers[]` | Each provider's `name`, `color`, `source`, `plan`, and (for manual ones) `used` / `limit`. |
 
 `source` is either `claude_auto` (fetched automatically) or `manual` (you fill in `used`/`limit`).
+
+`plan` is the small badge shown next to the provider name. Use `auto` on `claude_auto` to
+detect it from your Claude credentials, or set a fixed label (e.g. `plus`, `free`) for the
+others.
 
 ### `config/user.config.yaml` — user-specific (git-ignored)
 
