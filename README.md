@@ -114,7 +114,7 @@ paths:
   claude_projects_glob: ~/.claude/projects/**/*.jsonl
   claude_usage_cache: ~/.tokentracker/tracker/claude-usage-limits-cache.json
   codex_home: ~/.codex
-  codex_binary: ""
+  codex_binary: auto
 ```
 
 If this file is missing, the app falls back to the example template and then to the default

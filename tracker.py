@@ -312,7 +312,7 @@ def codex_plan_from_auth():
 
 def _codex_binary():
     configured = _paths.get("codex_binary")
-    if configured:
+    if configured and str(configured).lower() != "auto":
         path = _resolve_path(configured)
         return path if os.path.exists(path) else configured
     candidates = glob.glob(os.path.join(CODEX_HOME, "packages/standalone/releases/*/bin/codex"))
