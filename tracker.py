@@ -346,7 +346,22 @@ def _codex_binary():
     candidates = glob.glob(os.path.join(CODEX_HOME, "packages/standalone/releases/*/bin/codex"))
     if candidates:
         return max(candidates, key=os.path.getmtime)
-    return shutil.which("codex")
+    # npm / homebrew installs land on PATH
+    found = shutil.which("codex")
+    if found:
+        return found
+    # Well-known locations not on PATH — notably the macOS Codex.app, where `codex`
+    # is only a shell alias that shutil.which can't see.
+    for p in (
+        "/Applications/Codex.app/Contents/Resources/codex",
+        os.path.expanduser("~/Applications/Codex.app/Contents/Resources/codex"),
+        "/opt/homebrew/bin/codex",
+        "/usr/local/bin/codex",
+        os.path.expanduser("~/.codex/bin/codex"),
+    ):
+        if os.path.exists(p):
+            return p
+    return None
 
 
 def _stream_reader(stream, label, out):
