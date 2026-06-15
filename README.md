@@ -42,9 +42,9 @@ This is **not Linux-only**. `pywebview` is cross-platform, and the data sources
 
 | OS | Status | Notes |
 |----|--------|-------|
-| **Linux** | Primary | Needs WebKit2GTK (`gir1.2-webkit2-4.1` / `libwebkit2gtk-4.1`). `install.sh` adds a GNOME app launcher. |
-| **macOS** | Supported | Uses the built-in WebKit. Run with `./run.sh` or `python tracker.py`. |
-| **Windows** | Supported | Needs the [WebView2 runtime](https://developer.microsoft.com/microsoft-edge/webview2/). Run `python tracker.py` (the `.sh` scripts and `.desktop` launcher are POSIX-only). |
+| **Linux** | Tested, working | Needs WebKit2GTK (`gir1.2-webkit2-4.1` / `libwebkit2gtk-4.1`). `install.sh` adds a GNOME app launcher. |
+| **macOS** | Tested, working | Uses the built-in WebKit. Claude token is read from the login Keychain; the Codex.app binary is auto-detected. Run with `./run.sh` or `python tracker.py`. |
+| **Windows** | Not yet tested | Should work (`pywebview` is cross-platform), but live Claude/Codex data hasn't been verified on Windows yet. Needs the [WebView2 runtime](https://developer.microsoft.com/microsoft-edge/webview2/). Run `python tracker.py` (the `.sh` scripts and `.desktop` launcher are POSIX-only). |
 
 ## Requirements
 
