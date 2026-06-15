@@ -127,9 +127,7 @@ For Claude, data is resolved in priority order:
 1. **Live** — calls `https://api.anthropic.com/api/oauth/usage` with the OAuth token from
    `~/.claude/.credentials.json`. Returns official `five_hour` / `seven_day` utilization and
    reset times. Also refreshes the local cache.
-2. **Cache** — reads `claude-usage-limits-cache.json` (written by the live call above and by
-   [tokentracker-cli](https://www.npmjs.com/package/tokentracker-cli) if you use it) when the
-   token is expired or offline.
+2. **Cache** — reads `claude-usage-limits-cache.json`  when the token is expired or offline.
 3. **Estimate** — sums token counts from `~/.claude/projects/**/*.jsonl` over the window as a
    last resort.
 
