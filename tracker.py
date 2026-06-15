@@ -18,6 +18,7 @@ import queue
 import shutil
 import sqlite3
 import subprocess
+import sys
 import threading
 import time
 import urllib.request
@@ -113,10 +114,23 @@ def _minutes_until_epoch(value):
 
 
 def _read_creds():
+    """Claude OAuth creds. Linux/Windows use the file; macOS stores them in the
+    login Keychain (the file is absent there)."""
     try:
         return json.load(open(CLAUDE_CREDS, encoding="utf-8")).get("claudeAiOauth", {})
     except (OSError, ValueError):
-        return {}
+        pass
+    if sys.platform == "darwin":
+        try:
+            out = subprocess.run(
+                ["security", "find-generic-password", "-s", "Claude Code-credentials", "-w"],
+                capture_output=True, text=True, timeout=5,
+            ).stdout.strip()
+            if out:
+                return json.loads(out).get("claudeAiOauth", {})
+        except (OSError, ValueError, subprocess.SubprocessError):
+            pass
+    return {}
 
 
 def subscription_type():
