@@ -106,7 +106,8 @@ don't pass `--system-site-packages`.
 
 ## Configuration
 
-All settings live under `config/` as YAML.
+All settings live under `config/` as YAML. The defaults work out of the box, so you can run the app
+without editing anything — the keys below are only for customizing it.
 
 ### `config/config.yaml` — app / display settings (committed)
 
@@ -123,15 +124,13 @@ All settings live under `config/` as YAML.
 `codex_auto` to detect it from local credentials, or set a fixed label (e.g. `plus`,
 `free`).
 
-### `config/user.config.yaml` — user-specific (git-ignored)
+### `config/user.config.yaml` — optional path overrides (git-ignored)
 
-Copied from `config/user.config.example.yaml`. Holds your identity and the paths the app
-reads from. `~` expands to your home directory.
+**Not required to run the app** — it falls back to the defaults below (all `~`-based, so they resolve
+to your own home). Create this file only to point at non-default locations. `~` expands to your home
+directory.
 
 ```yaml
-user:
-  name: your-username
-  home: /home/you
 paths:
   claude_credentials: ~/.claude/.credentials.json
   claude_projects_glob: ~/.claude/projects/**/*.jsonl
