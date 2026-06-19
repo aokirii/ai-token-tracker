@@ -70,6 +70,7 @@
   }
   footer { text-align: center; font-size: 10.5px; color: var(--muted); margin-top: 8px; }
   .err { color: #e5645a; font-size: 12px; text-align: center; padding: 20px; }
+  .hint { font-size: 10.5px; color: #e0a23c; margin-top: 6px; }
 </style>
 </head>
 <body>
@@ -105,7 +106,8 @@
           <span>${p.primary || ""}</span>
           <span>${p.extra || ""}</span>
         </div>
-        <div class="row2"><span>${p.sub || ""}</span></div>`;
+        <div class="row2"><span>${p.sub || ""}</span></div>
+        ${p.hint ? `<div class="hint">${p.hint}</div>` : ""}`;
       root.appendChild(card);
     });
     const now = new Date().toLocaleTimeString();

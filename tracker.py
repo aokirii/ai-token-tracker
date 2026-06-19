@@ -166,6 +166,12 @@ def _ssl_context():
 _SSL_CTX = _ssl_context()
 
 
+def _token_expired():
+    """True if the on-disk Claude access token is past its expiry."""
+    exp = _read_creds().get("expiresAt")
+    return bool(exp) and int(exp) / 1000 <= datetime.now(timezone.utc).timestamp()
+
+
 def claude_live():
     """Call Anthropic /api/oauth/usage directly. None on failure."""
     creds = _read_creds()
@@ -550,8 +556,13 @@ class Api:
             }
             if source == "claude_auto":
                 data = claude_auto(cfg.get("live_interval_seconds", 60))
+                expired = _token_expired()
+                if expired:
+                    card["hint"] = "Sign in: run `claude` in a terminal (or /login)"
                 if data:
-                    note = "live" if data["origin"] == "live" else "cache (official)"
+                    note = ("live" if data["origin"] == "live"
+                            else ("cache · auth expired" if expired
+                                  else "cache (official)"))
                     sub = _fmt_reset(data["resets_in"])
                     card.update(
                         pct=data["pct"],
@@ -570,7 +581,8 @@ class Api:
                     card.update(
                         pct=pct,
                         primary=f"{_fmt_tokens(used)} / {_fmt_tokens(limit)} tokens",
-                        sub=_fmt_reset(resets_in) or "estimate (no cache)",
+                        sub=("auth expired" if expired
+                             else _fmt_reset(resets_in) or "estimate (no cache)"),
                         extra="", source="jsonl",
                     )
             elif source == "codex_auto":
