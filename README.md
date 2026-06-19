@@ -9,8 +9,8 @@ straight from Anthropic, so what you see matches your plan limits — not a gues
 shows, **for Claude only**, how full the context window of each open Claude Code session
 is (one bar per session), and splits every Claude bar into **input / cache / output**
 token segments so you can see what your usage is made of. A **☰ menu** (top-left) switches
-between this **live** view and an **offline** view that summarises your Claude token usage
-over the last day, week and month.
+between three views: **live**, an **offline** summary of your Claude token usage over the last
+day / week / month, and a **heatmap** of daily and hour-of-day usage.
 For Codex it reads your local `~/.codex` login through the Codex app-server.
 
 ```
@@ -66,9 +66,11 @@ same way:
 - **Token-type breakdown** *(Claude only)* — every Claude bar (the 5h rate window and each
   session's context) is split into **input**, **cache**, and **output** colored segments
   that sum to the bar's fill, so you can see what your usage is made of.
-- **Live / Offline views** *(Claude only)* — a **☰ menu** toggles between the live dashboard
-  and an **offline** summary of your Claude token usage over the last day, week and month —
-  each with the same input / cache / output split. Offline is a snapshot, computed on demand.
+- **Live / Offline / Heatmap views** *(Claude only)* — a **☰ menu** switches between the live
+  dashboard, an **offline** summary of your Claude token usage over the last day / week / month
+  (same input / cache / output split), and a **heatmap** showing daily usage over the last 12
+  weeks plus an hour-of-day punch-card (weekday × hour). Offline and heatmap are snapshots,
+  computed on demand.
 - **Live Codex usage** — Codex plan and rate-limit percentage from your local `~/.codex`
   session.
 - **Per-provider plan badge** next to each name — Claude and Codex can be auto-detected.
@@ -307,6 +309,18 @@ again excluded) across `~/.claude/projects/**/*.jsonl` over three rolling window
 **24h**, **7d** and **30d** — and shows each period's total with its input/cache/output split.
 It's computed on demand when you open it (not polled), so the heavier 30-day scan doesn't run
 while you're watching the live view.
+
+### Heatmap view (Claude only)
+
+The **☰ → Heatmap** view buckets the same tokens (cache reads excluded) by **local** time into
+two grids, each cell shaded 0–4 by intensity relative to the busiest bucket:
+
+- **Daily** — a GitHub-style grid of the last 12 weeks (columns = weeks, rows = Mon–Sun), one
+  cell per calendar day.
+- **By hour of day** — a punch-card of weekday × hour (rows = Mon–Sun, columns = 0–23h), so you
+  can see when in the day and week you actually use Claude.
+
+Hover any cell for its date/hour and token total. Also computed on demand.
 
 All of this is read-only and local — nothing here is sent anywhere.
 

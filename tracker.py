@@ -344,6 +344,100 @@ def claude_history():
     return buckets
 
 
+def _heatmap_daily(days_back):
+    """Total tokens (input + cache-write + output, cache reads excluded) per LOCAL
+    calendar day over the last days_back days."""
+    cutoff = datetime.now(timezone.utc) - timedelta(days=days_back)
+    cutoff_ts = cutoff.timestamp()
+    totals = {}
+    for path in glob.glob(CLAUDE_GLOB, recursive=True):
+        try:
+            if os.path.getmtime(path) < cutoff_ts:
+                continue
+            with open(path, encoding="utf-8") as f:
+                for line in f:
+                    try:
+                        d = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    ts = _parse_ts(d.get("timestamp"))
+                    u = (d.get("message") or {}).get("usage")
+                    if ts is None or ts < cutoff or not u:
+                        continue
+                    day = ts.astimezone().date().isoformat()
+                    totals[day] = totals.get(day, 0) + (
+                        u.get("input_tokens", 0)
+                        + u.get("cache_creation_input_tokens", 0)
+                        + u.get("output_tokens", 0))
+        except OSError:
+            continue
+    return totals
+
+
+def claude_heatmap(weeks=12):
+    """GitHub-style daily-usage grid: `weeks` columns of 7 day-cells (Mon..Sun),
+    each at intensity level 0-4 by that day's total tokens. For the heatmap panel."""
+    today = datetime.now().astimezone().date()
+    start = today - timedelta(days=today.weekday() + 7 * (weeks - 1))
+    totals = _heatmap_daily((today - start).days + 1)
+    peak = max(totals.values(), default=0)
+    cols, day = [], start
+    while day <= today:
+        col = []
+        for _ in range(7):
+            if day <= today:
+                tot = totals.get(day.isoformat(), 0)
+                level = 0 if not (peak and tot) else min(4, 1 + int(tot / peak * 3.999))
+                col.append({"date": day.isoformat(), "total_label": _fmt_tokens(tot),
+                            "level": level})
+            else:
+                col.append(None)
+            day += timedelta(days=1)
+        cols.append(col)
+    return {"weeks": cols, "total_label": _fmt_tokens(sum(totals.values()))}
+
+
+_WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+
+
+def claude_hourly(weeks=12):
+    """Punch-card: total tokens per (weekday, hour-of-day) in LOCAL time over the
+    last `weeks`, at intensity level 0-4. Rows = Mon..Sun, cols = 0..23h."""
+    cutoff = datetime.now(timezone.utc) - timedelta(weeks=weeks)
+    cutoff_ts = cutoff.timestamp()
+    grid = [[0] * 24 for _ in range(7)]
+    for path in glob.glob(CLAUDE_GLOB, recursive=True):
+        try:
+            if os.path.getmtime(path) < cutoff_ts:
+                continue
+            with open(path, encoding="utf-8") as f:
+                for line in f:
+                    try:
+                        d = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    ts = _parse_ts(d.get("timestamp"))
+                    u = (d.get("message") or {}).get("usage")
+                    if ts is None or ts < cutoff or not u:
+                        continue
+                    local = ts.astimezone()
+                    grid[local.weekday()][local.hour] += (
+                        u.get("input_tokens", 0)
+                        + u.get("cache_creation_input_tokens", 0)
+                        + u.get("output_tokens", 0))
+        except OSError:
+            continue
+    peak = max((max(row) for row in grid), default=0)
+    rows = []
+    for wd in range(7):
+        cells = [{"hour": h, "total_label": _fmt_tokens(grid[wd][h]),
+                  "level": 0 if not (peak and grid[wd][h])
+                  else min(4, 1 + int(grid[wd][h] / peak * 3.999))}
+                 for h in range(24)]
+        rows.append({"day": _WEEKDAYS[wd], "cells": cells})
+    return {"rows": rows}
+
+
 def _model_from_settings(cwd):
     """The model string Claude Code is configured to use, read for the '[1m]'
     context-beta flag. Project settings (from the active session's cwd) override
@@ -1001,6 +1095,13 @@ class Api:
             _history_card("weekly", "Weekly · 7d", h["weekly"]),
             _history_card("monthly", "Monthly · 30d", h["monthly"]),
         ]}
+
+    def get_heatmap(self):
+        """Heatmap view: a GitHub-style grid of daily Claude token usage plus an
+        hour-of-day punch-card, over the last weeks. Computed on demand."""
+        data = claude_heatmap(12)
+        data["hourly"] = claude_hourly(12)
+        return data
 
 
 def main():

@@ -50,6 +50,27 @@
   .menu-item.active { color: var(--text); }
   .menu-item .tick { color: #3ea76f; font-size: 11px; }
 
+  .hm-grid { display: flex; gap: 3px; margin: 8px 0 10px; }
+  .hm-col { display: flex; flex-direction: column; gap: 3px; }
+  .hm-cell { width: 13px; height: 13px; border-radius: 3px; background: var(--track); }
+  .hm-cell.hm-empty { background: transparent; }
+  .hm-l0 { background: var(--track); }
+  .hm-l1 { background: #1e4d33; }
+  .hm-l2 { background: #2d7a4f; }
+  .hm-l3 { background: #3ea76f; }
+  .hm-l4 { background: #5fd98f; }
+  .hm-legend {
+    display: flex; align-items: center; gap: 4px; justify-content: flex-end;
+    font-size: 10px; color: var(--muted);
+  }
+  .hm-legend .hm-cell { width: 11px; height: 11px; }
+
+  .hm-hours { display: flex; flex-direction: column; gap: 2px; margin: 8px 0 6px; }
+  .hm-hrow { display: flex; gap: 2px; align-items: center; }
+  .hm-hrow .hm-cell { width: 11px; height: 11px; border-radius: 2px; }
+  .hm-day { width: 26px; font-size: 9.5px; color: var(--muted); }
+  .hm-hlabel { width: 11px; font-size: 8px; color: var(--muted); text-align: center; }
+
   .card {
     background: var(--card);
     border-radius: 14px;
@@ -118,6 +139,7 @@
     <div id="menu" class="menu hidden">
       <div class="menu-item" data-mode="live">Live<span class="tick"></span></div>
       <div class="menu-item" data-mode="offline">Offline<span class="tick"></span></div>
+      <div class="menu-item" data-mode="heatmap">Heatmap<span class="tick"></span></div>
     </div>
   </header>
   <div id="cards"></div>
@@ -206,6 +228,41 @@
     document.getElementById("foot").textContent = "Offline · daily / weekly / monthly token usage";
   }
 
+  function renderHeatmap(data) {
+    const root = document.getElementById("cards");
+    root.innerHTML = "";
+    const cols = data.weeks.map(week => `
+      <div class="hm-col">
+        ${week.map(cell => cell
+          ? `<div class="hm-cell hm-l${cell.level}" title="${cell.date} · ${cell.total_label} tokens"></div>`
+          : `<div class="hm-cell hm-empty"></div>`).join("")}
+      </div>`).join("");
+    const hhead = `<div class="hm-hrow"><span class="hm-day"></span>${
+      Array.from({length: 24}, (_, h) => `<span class="hm-hlabel">${h % 6 === 0 ? h : ""}</span>`).join("")}</div>`;
+    const hrows = (data.hourly ? data.hourly.rows : []).map(row => `
+      <div class="hm-hrow"><span class="hm-day">${row.day}</span>${
+        row.cells.map(c => `<div class="hm-cell hm-l${c.level}" title="${row.day} ${String(c.hour).padStart(2, "0")}:00 · ${c.total_label} tokens"></div>`).join("")}
+      </div>`).join("");
+    const card = document.createElement("div");
+    card.className = "card";
+    card.innerHTML = `
+      <div class="row1">
+        <div class="name">Heatmap</div>
+        <div class="pct" style="font-size:13px">${data.total_label} tokens</div>
+      </div>
+      <div class="ctx-head"><span class="label">Daily · last 12 weeks</span></div>
+      <div class="hm-grid">${cols}</div>
+      <div class="hm-legend"><span>less</span>
+        <span class="hm-cell hm-l0"></span><span class="hm-cell hm-l1"></span>
+        <span class="hm-cell hm-l2"></span><span class="hm-cell hm-l3"></span>
+        <span class="hm-cell hm-l4"></span><span>more</span>
+      </div>
+      <div class="ctx-head" style="margin-top:14px"><span class="label">By hour of day</span></div>
+      <div class="hm-hours">${hhead}${hrows}</div>`;
+    root.appendChild(card);
+    document.getElementById("foot").textContent = "Heatmap · daily + hourly token usage";
+  }
+
   async function refresh() {
     try {
       const data = await window.pywebview.api.get_data();
@@ -227,8 +284,18 @@
     }
   }
 
+  async function refreshHeatmap() {
+    try {
+      renderHeatmap(await window.pywebview.api.get_heatmap());
+    } catch (e) {
+      document.getElementById("cards").innerHTML =
+        `<div class="err">Failed to load heatmap: ${e}</div>`;
+    }
+  }
+
   let mode = "live";
   let timer = null;
+  const SNAPSHOTS = { offline: refreshHistory, heatmap: refreshHeatmap };
 
   async function tick() {
     if (timer) { clearTimeout(timer); timer = null; }
@@ -236,7 +303,7 @@
       const sec = await refresh();
       if (mode === "live") timer = setTimeout(tick, sec * 1000);
     } else {
-      await refreshHistory();   // offline: one snapshot, no polling
+      await SNAPSHOTS[mode]();   // offline / heatmap: one snapshot, no polling
     }
   }
 
