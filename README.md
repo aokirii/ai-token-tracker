@@ -57,6 +57,31 @@ same way:
 └────────────────────────────────────────────────┘
 ```
 
+The **heatmap** view (☰ → Heatmap) shades daily usage over the last 12 weeks and an
+hour-of-day punch-card by intensity:
+
+```
+☰ → Heatmap                          9,200,000 tokens
+
+  Daily · last 12 weeks              less ·░▒▓█ more
+    Mon  ░▓█▒▒█▒▓▓▒▓█
+    Tue  ▒██▓▓█▓██▓██
+    Wed  ░▓█▒▒█▒▓▓▒▓█
+    Thu  ▒██▓▓█▓██▓██
+    Fri  ▓███████████
+    Sat  ·▒▓░░▓░▒▒░▒▓
+    Sun  ░····░····░·
+
+  By hour of day   0     6    12    18   23
+    Mon  ·········░░░░▓██▓▒··░▓░·
+    Tue  ·········░░░░▓██▓▒··░▓░·
+    Wed  ·········░░░░▓██▓▒··░▓░·
+    Thu  ·········░░░░▓██▓▒··░▓░·
+    Fri  ·········░░░░▓██▓▒··░▓░·
+    Sat  ···········░░·······░···
+    Sun  ···········░░·······░···
+```
+
 ## Features
 
 - **Live Claude usage** — official 5h / 7d utilization % and exact reset time.
