@@ -11,6 +11,8 @@ providers:
     source: claude_auto      # automatic: live API, cache, jsonl
     plan: auto               # 'auto' = detect from credentials; or set a fixed label
     limit: 1000000           # quota for manual providers; unused for claude_auto
+    context_limit: auto      # context-window size: 'auto' (reads model for [1m]; else 200k, bumps to 1M when used>200k), or pin 200000 / 1000000
+    context_sessions: 3      # max number of open Claude sessions to show separate context bars for (detected from running processes)
     color: "#d97757"
 
   - id: codex

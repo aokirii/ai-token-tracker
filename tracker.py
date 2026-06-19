@@ -38,6 +38,7 @@ _DEFAULT_PATHS = {
     "claude_credentials": "~/.claude/.credentials.json",
     "claude_projects_glob": "~/.claude/projects/**/*.jsonl",
     "claude_usage_cache": "~/.tokentracker/tracker/claude-usage-limits-cache.json",
+    "claude_settings": "~/.claude/settings.json",
     "codex_home": "~/.codex",
     "codex_binary": "",
 }
@@ -76,6 +77,7 @@ def _resolve_path(path):
 CLAUDE_GLOB = os.path.expanduser(_paths["claude_projects_glob"])
 CLAUDE_CACHE = os.path.expanduser(_paths["claude_usage_cache"])
 CLAUDE_CREDS = os.path.expanduser(_paths["claude_credentials"])
+CLAUDE_SETTINGS = os.path.expanduser(_paths["claude_settings"])
 CODEX_HOME = _resolve_path(_paths["codex_home"])
 CODEX_AUTH = os.path.join(CODEX_HOME, "auth.json")
 CODEX_STATE_DB = os.path.join(CODEX_HOME, "state_5.sqlite")
@@ -269,6 +271,308 @@ def claude_from_jsonl(window_hours):
         resets_in = max(0, int(((earliest + timedelta(hours=window_hours)) - now)
                               .total_seconds() // 60))
     return total, resets_in
+
+
+def claude_window_parts(window_hours):
+    """input / cache-write / output token totals across all sessions in the last
+    window_hours (cache reads excluded), for the rate-window breakdown. Files with
+    no activity in the window are skipped by mtime."""
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=window_hours)
+    cutoff_ts = cutoff.timestamp()
+    parts = {"input": 0, "cache": 0, "output": 0}
+    for path in glob.glob(CLAUDE_GLOB, recursive=True):
+        try:
+            if os.path.getmtime(path) < cutoff_ts:
+                continue
+            with open(path, encoding="utf-8") as f:
+                for line in f:
+                    try:
+                        d = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    ts = _parse_ts(d.get("timestamp"))
+                    if ts is None or ts < cutoff:
+                        continue
+                    u = (d.get("message") or {}).get("usage")
+                    if not u:
+                        continue
+                    parts["input"] += u.get("input_tokens", 0)
+                    parts["cache"] += u.get("cache_creation_input_tokens", 0)
+                    parts["output"] += u.get("output_tokens", 0)
+        except OSError:
+            continue
+    return parts
+
+
+def _model_from_settings(cwd):
+    """The model string Claude Code is configured to use, read for the '[1m]'
+    context-beta flag. Project settings (from the active session's cwd) override
+    the user's ~/.claude/settings.json, matching Claude Code's own precedence."""
+    candidates = []
+    if cwd:
+        candidates += [os.path.join(cwd, ".claude", "settings.local.json"),
+                       os.path.join(cwd, ".claude", "settings.json")]
+    candidates.append(CLAUDE_SETTINGS)
+    for path in candidates:
+        try:
+            with open(path, encoding="utf-8") as f:
+                model = (json.load(f) or {}).get("model")
+        except (OSError, ValueError):
+            continue
+        if model:
+            return str(model)
+    return ""
+
+
+def _context_limit(cfg_value, used, model=""):
+    """Resolve the context-window size. A positive numeric config value pins that
+    exact limit. Otherwise ('auto') the '[1m]' beta in the configured model means
+    1M; failing that, fall back to the 200k tier, upgrading to 1M once observed
+    usage has passed 200k — the two tiers Claude Code exposes."""
+    try:
+        pinned = int(cfg_value)
+        if pinned > 0:
+            return pinned
+    except (TypeError, ValueError):
+        pass
+    if "1m" in model.lower():
+        return 1_000_000
+    return 1_000_000 if used > 200_000 else 200_000
+
+
+def _session_project(cwd):
+    """Short, human label for a session, taken from its working directory so two
+    open sessions can be told apart (e.g. 'General' vs 'tolaria')."""
+    if not cwd:
+        return ""
+    return os.path.basename(cwd.rstrip("/\\")) or cwd
+
+
+def _read_context(path, limit_cfg):
+    """Context reading for one session jsonl. The window fill (`used`/`pct`) comes
+    from the last message's usage, while `parts` are the session-cumulative
+    input / cache-write / output totals — excluding cache *reads*, which only
+    re-count the same history each turn — i.e. the meaningful composition of what
+    filled the window. Labelled by the session's current working dir. None if no
+    usable usage."""
+    last = None
+    home_cwd = ""
+    parts = {"input": 0, "cache": 0, "output": 0}
+    try:
+        with open(path, encoding="utf-8") as f:
+            for line in f:
+                try:
+                    d = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if not home_cwd and d.get("cwd"):
+                    home_cwd = d["cwd"]
+                u = (d.get("message") or {}).get("usage")
+                if not u:
+                    continue
+                last = d
+                parts["input"] += u.get("input_tokens", 0)
+                parts["cache"] += u.get("cache_creation_input_tokens", 0)
+                parts["output"] += u.get("output_tokens", 0)
+    except OSError:
+        return None
+    if last is None:
+        return None
+    lu = last["message"]["usage"]
+    used = (lu.get("input_tokens", 0) + lu.get("output_tokens", 0)
+            + lu.get("cache_creation_input_tokens", 0)
+            + lu.get("cache_read_input_tokens", 0))
+    work_cwd = last.get("cwd") or home_cwd
+    limit = _context_limit(limit_cfg, used, _model_from_settings(home_cwd or work_cwd))
+    return {
+        "used": used,
+        "limit": limit,
+        "pct": round(used / limit * 100, 1) if limit else 0,
+        "model": last["message"].get("model"),
+        "project": _session_project(work_cwd),
+        "parts": parts,
+    }
+
+
+def _argv_is_claude(argv):
+    """True if a process argv belongs to the Claude Code CLI (a bare `claude`
+    binary, or a node-launched `.../claude-code/cli.js`) — not a shell it spawned."""
+    if not argv:
+        return False
+    if os.path.basename(argv[0]) == "claude":
+        return True
+    return any(a.endswith("claude-code/cli.js") or a.endswith("/claude")
+               for a in argv[1:])
+
+
+def _proc_start_epoch(pid):
+    """Unix start time of a Linux process, so a session that ended before the
+    process began can be rejected as stale. None if it can't be determined."""
+    try:
+        with open("/proc/stat") as f:
+            btime = next(int(l.split()[1]) for l in f if l.startswith("btime "))
+        with open(f"/proc/{pid}/stat", "rb") as f:
+            after_comm = f.read().rpartition(b")")[2].split()
+        ticks = int(after_comm[19])  # field 22 (starttime), counting after comm
+        return btime + ticks / os.sysconf("SC_CLK_TCK")
+    except (OSError, ValueError, StopIteration, IndexError, ZeroDivisionError):
+        return None
+
+
+def _claude_open_cwds_linux():
+    """(cwd, start_epoch) of each running Claude Code process, via /proc."""
+    procs = []
+    for entry in os.listdir("/proc"):
+        if not entry.isdigit():
+            continue
+        try:
+            with open(f"/proc/{entry}/cmdline", "rb") as f:
+                argv = [a.decode("utf-8", "replace") for a in f.read().split(b"\0") if a]
+        except OSError:
+            continue
+        if not _argv_is_claude(argv):
+            continue
+        try:
+            cwd = os.readlink(f"/proc/{entry}/cwd")
+        except OSError:
+            continue
+        procs.append((cwd, _proc_start_epoch(entry)))
+    return procs
+
+
+def _claude_open_cwds_darwin():
+    """(cwd, None) of each running Claude Code process, via pgrep + lsof (macOS).
+    Start time isn't read here, so the stale-session guard is skipped on macOS."""
+    try:
+        pids = subprocess.run(["pgrep", "-f", "claude"], capture_output=True,
+                              text=True, timeout=4).stdout.split()
+    except (OSError, subprocess.SubprocessError):
+        return None
+    procs = []
+    for pid in (p for p in pids if p.isdigit()):
+        try:
+            cmd = subprocess.run(["ps", "-o", "command=", "-p", pid],
+                                 capture_output=True, text=True, timeout=4).stdout
+            if not _argv_is_claude(cmd.split()):
+                continue
+            out = subprocess.run(["lsof", "-a", "-d", "cwd", "-p", pid, "-Fn"],
+                                 capture_output=True, text=True, timeout=5).stdout
+        except (OSError, subprocess.SubprocessError):
+            continue
+        for line in out.splitlines():
+            if line.startswith("n"):
+                procs.append((line[1:], None))
+                break
+    return procs
+
+
+def _open_session_cwds():
+    """(cwd, start_epoch) for each currently-running Claude Code process. None when
+    the platform can't report it (caller then falls back to mtime-based detection);
+    a list (possibly empty) when it can. start_epoch is None when unknown."""
+    try:
+        if sys.platform.startswith("linux"):
+            return _claude_open_cwds_linux()
+        if sys.platform == "darwin":
+            return _claude_open_cwds_darwin()
+    except OSError:
+        return None
+    return None
+
+
+def _jsonl_cwd(path):
+    """The working directory recorded inside a session jsonl, or '' if absent."""
+    try:
+        with open(path, encoding="utf-8") as f:
+            for line in f:
+                try:
+                    cwd = json.loads(line).get("cwd")
+                except json.JSONDecodeError:
+                    continue
+                if cwd:
+                    return cwd
+    except OSError:
+        pass
+    return ""
+
+
+def _paths_for_open_cwds(files, open_procs):
+    """Session jsonls (newest first) whose recorded cwd matches a running Claude
+    process — up to one per process, so N processes in a dir map to its N newest
+    sessions. A session is skipped if its last activity predates the earliest
+    process in that dir: that means it ended before any current process started
+    there (e.g. a closed session whose dir was just reopened)."""
+    want, floor = {}, {}
+    for cwd, start in open_procs:
+        key = os.path.normpath(cwd)
+        want[key] = want.get(key, 0) + 1
+        if start is not None:
+            floor[key] = start if key not in floor else min(floor[key], start)
+    chosen = []
+    for mtime, path in files:  # newest first
+        if not any(want.values()):
+            break
+        key = os.path.normpath(_jsonl_cwd(path))
+        if want.get(key, 0) <= 0:
+            continue
+        if key in floor and mtime < floor[key]:
+            continue  # session ended before any process here started: stale
+        chosen.append(path)
+        want[key] -= 1
+    return chosen
+
+
+def claude_contexts(limit_cfg, max_sessions=3, active_minutes=15):
+    """Context fill of each open Claude Code session, newest first. Open sessions
+    are detected from running `claude` processes, so each stays visible as long as
+    its process lives — even while idle. When the platform can't report processes
+    (or none match a session yet), falls back to jsonls written in the last
+    active_minutes, then to the single newest, so the gauge never disappears."""
+    files = []
+    for path in glob.glob(CLAUDE_GLOB, recursive=True):
+        try:
+            files.append((os.path.getmtime(path), path))
+        except OSError:
+            continue
+    if not files:
+        return []
+    files.sort(reverse=True)
+
+    paths = None
+    open_procs = _open_session_cwds()
+    if open_procs:
+        paths = _paths_for_open_cwds(files, open_procs)
+    if not paths:  # detection unavailable or nothing matched: mtime fallback
+        cutoff = time.time() - active_minutes * 60
+        paths = [p for m, p in files if m >= cutoff] or [files[0][1]]
+
+    out = []
+    for path in paths[:max_sessions]:
+        ctx = _read_context(path, limit_cfg)
+        if ctx:
+            out.append(ctx)
+    return out
+
+
+def _scaled_parts(parts, pct):
+    """input/cache/output shares of `parts`, scaled so the three sum to `pct`."""
+    total = sum(parts.values()) or 1
+    return [{"key": key, "pct": round(parts[key] / total * pct, 1)}
+            for key in ("input", "cache", "output")]
+
+
+def _context_card(ctx):
+    """Shape one context reading into the UI payload: total fill plus the
+    input / cache / output split. Each split is the session's share of that token
+    type, scaled to the window fill so the three sum to the used percent."""
+    parts = _scaled_parts(ctx["parts"], ctx["pct"])
+    return {
+        "pct": ctx["pct"],
+        "label": f"{_fmt_tokens(ctx['used'])} / {_fmt_tokens(ctx['limit'])} tokens",
+        "model": ctx["model"] or "",
+        "project": ctx["project"],
+        "parts": parts,
+    }
 
 
 def _fmt_reset(minutes):
@@ -585,6 +889,13 @@ class Api:
                              else _fmt_reset(resets_in) or "estimate (no cache)"),
                         extra="", source="jsonl",
                     )
+                wparts = claude_window_parts(window_hours)
+                if sum(wparts.values()) > 0:
+                    card["parts"] = _scaled_parts(wparts, card.get("pct") or 0)
+                card["contexts"] = [
+                    _context_card(ctx)
+                    for ctx in claude_contexts(p.get("context_limit", "auto"),
+                                               p.get("context_sessions", 3))]
             elif source == "codex_auto":
                 data = codex_auto(cfg.get("live_interval_seconds", 60))
                 if data:

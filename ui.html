@@ -71,6 +71,23 @@
   footer { text-align: center; font-size: 10.5px; color: var(--muted); margin-top: 8px; }
   .err { color: #e5645a; font-size: 12px; text-align: center; padding: 20px; }
   .hint { font-size: 10.5px; color: #e0a23c; margin-top: 6px; }
+
+  .ctx { margin-top: 13px; padding-top: 12px; border-top: 1px solid var(--track); }
+  .ctx-head {
+    display: flex; justify-content: space-between; align-items: baseline;
+    margin-bottom: 7px; font-size: 11.5px; color: var(--muted);
+    font-variant-numeric: tabular-nums;
+  }
+  .ctx-head .label { text-transform: uppercase; letter-spacing: .5px; font-size: 9.5px; }
+  .ctx-parts {
+    display: flex; gap: 13px; margin-bottom: 7px;
+    font-size: 10.5px; font-variant-numeric: tabular-nums;
+  }
+  .ctx-parts .seg-label { display: flex; align-items: center; gap: 5px; }
+  .ctx-parts .swatch { width: 8px; height: 8px; border-radius: 2px; }
+  .bar.stacked { display: flex; }
+  .seg { height: 100%; }
+  .seg + .seg { box-shadow: inset 1px 0 0 var(--card); }
 </style>
 </head>
 <body>
@@ -87,6 +104,10 @@
     return "#3ea76f";
   }
 
+  // context-window token types: orange = input, green = cache, yellow = output
+  const PART_COLORS = { input: "#e8843a", cache: "#3ea76f", output: "#e6cf4f" };
+  function partColor(key) { return PART_COLORS[key] || "#888"; }
+
   function render(data) {
     const root = document.getElementById("cards");
     root.innerHTML = "";
@@ -101,13 +122,34 @@
           <div class="name"><span class="dot" style="background:${p.color}"></span>${p.name}${plan}</div>
           <div class="pct" style="color:${barColor(p.pct)}">${p.pct}%</div>
         </div>
-        <div class="bar"><div class="fill" style="width:${pctShown}%;background:${barColor(p.pct)}"></div></div>
+        ${p.parts ? `
+          <div class="ctx-parts">
+            ${p.parts.map(part => `<span class="seg-label"><span class="swatch" style="background:${partColor(part.key)}"></span><span style="color:${partColor(part.key)}">${part.key} ${part.pct}%</span></span>`).join("")}
+          </div>
+          <div class="bar stacked">
+            ${p.parts.map(part => `<div class="seg" style="width:${Math.min(part.pct, 100)}%;background:${partColor(part.key)}"></div>`).join("")}
+          </div>`
+        : `<div class="bar"><div class="fill" style="width:${pctShown}%;background:${barColor(p.pct)}"></div></div>`}
         <div class="row2">
           <span>${p.primary || ""}</span>
           <span>${p.extra || ""}</span>
         </div>
         <div class="row2"><span>${p.sub || ""}</span></div>
-        ${p.hint ? `<div class="hint">${p.hint}</div>` : ""}`;
+        ${p.hint ? `<div class="hint">${p.hint}</div>` : ""}
+        ${(p.contexts || []).map(c => `
+          <div class="ctx">
+            <div class="ctx-head">
+              <span class="label">Context${c.project ? ` · ${c.project}` : ""}</span>
+              <span style="color:${barColor(c.pct)}">${c.pct}%</span>
+            </div>
+            <div class="ctx-parts">
+              ${c.parts.map(part => `<span class="seg-label"><span class="swatch" style="background:${partColor(part.key)}"></span><span style="color:${partColor(part.key)}">${part.key} ${part.pct}%</span></span>`).join("")}
+            </div>
+            <div class="bar stacked">
+              ${c.parts.map(part => `<div class="seg" style="width:${Math.min(part.pct, 100)}%;background:${partColor(part.key)}"></div>`).join("")}
+            </div>
+            <div class="row2"><span>${c.label}</span><span>${c.model || ""}</span></div>
+          </div>`).join("")}`;
       root.appendChild(card);
     });
     const now = new Date().toLocaleTimeString();

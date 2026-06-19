@@ -6,5 +6,6 @@ paths:
   claude_credentials: ~/.claude/.credentials.json
   claude_projects_glob: ~/.claude/projects/**/*.jsonl
   claude_usage_cache: ~/.tokentracker/tracker/claude-usage-limits-cache.json
+  claude_settings: ~/.claude/settings.json
   codex_home: ~/.codex
   codex_binary: auto
