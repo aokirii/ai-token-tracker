@@ -23,11 +23,32 @@
   }
   header {
     display: flex;
-    align-items: baseline;
-    justify-content: space-between;
+    align-items: center;
+    gap: 11px;
     margin-bottom: 18px;
+    position: relative;
   }
   header h1 { font-size: 16px; font-weight: 600; letter-spacing: .2px; }
+
+  .menu-btn {
+    background: none; border: none; color: var(--text); cursor: pointer;
+    font-size: 16px; line-height: 1; padding: 3px 6px; border-radius: 6px;
+  }
+  .menu-btn:hover { background: var(--card-hover); }
+  .menu {
+    position: absolute; top: 30px; left: 0; z-index: 10; min-width: 130px;
+    background: var(--card); border: 1px solid var(--track); border-radius: 9px;
+    padding: 5px; box-shadow: 0 8px 22px rgba(0,0,0,.45);
+  }
+  .menu.hidden { display: none; }
+  .menu-item {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 7px 10px; border-radius: 6px; font-size: 12.5px;
+    color: var(--muted); cursor: pointer;
+  }
+  .menu-item:hover { background: var(--card-hover); color: var(--text); }
+  .menu-item.active { color: var(--text); }
+  .menu-item .tick { color: #3ea76f; font-size: 11px; }
 
   .card {
     background: var(--card);
@@ -92,7 +113,12 @@
 </head>
 <body>
   <header>
+    <button id="menu-btn" class="menu-btn" title="View">&#9776;</button>
     <h1>AI Token Tracker</h1>
+    <div id="menu" class="menu hidden">
+      <div class="menu-item" data-mode="live">Live<span class="tick"></span></div>
+      <div class="menu-item" data-mode="offline">Offline<span class="tick"></span></div>
+    </div>
   </header>
   <div id="cards"></div>
   <footer id="foot"></footer>
@@ -156,6 +182,30 @@
     document.getElementById("foot").textContent = `Updated ${now}`;
   }
 
+  function renderHistory(data) {
+    const root = document.getElementById("cards");
+    root.innerHTML = "";
+    data.periods.forEach(p => {
+      const card = document.createElement("div");
+      card.className = "card";
+      card.innerHTML = `
+        <div class="row1">
+          <div class="name">${p.label}</div>
+          <div class="pct" style="font-size:15px">${p.total_label}</div>
+        </div>
+        ${p.parts.length ? `
+          <div class="ctx-parts">
+            ${p.parts.map(part => `<span class="seg-label"><span class="swatch" style="background:${partColor(part.key)}"></span><span style="color:${partColor(part.key)}">${part.key} ${part.pct}%</span></span>`).join("")}
+          </div>
+          <div class="bar stacked">
+            ${p.parts.map(part => `<div class="seg" style="width:${part.pct}%;background:${partColor(part.key)}"></div>`).join("")}
+          </div>`
+        : `<div class="row2"><span>no usage in this window</span></div>`}`;
+      root.appendChild(card);
+    });
+    document.getElementById("foot").textContent = "Offline · daily / weekly / monthly token usage";
+  }
+
   async function refresh() {
     try {
       const data = await window.pywebview.api.get_data();
@@ -168,12 +218,43 @@
     }
   }
 
-  async function loop() {
-    const sec = await refresh();
-    setTimeout(loop, sec * 1000);
+  async function refreshHistory() {
+    try {
+      renderHistory(await window.pywebview.api.get_history());
+    } catch (e) {
+      document.getElementById("cards").innerHTML =
+        `<div class="err">Failed to load history: ${e}</div>`;
+    }
   }
 
-  window.addEventListener("pywebviewready", loop);
+  let mode = "live";
+  let timer = null;
+
+  async function tick() {
+    if (timer) { clearTimeout(timer); timer = null; }
+    if (mode === "live") {
+      const sec = await refresh();
+      if (mode === "live") timer = setTimeout(tick, sec * 1000);
+    } else {
+      await refreshHistory();   // offline: one snapshot, no polling
+    }
+  }
+
+  function setMode(m) {
+    mode = m;
+    document.querySelectorAll(".menu-item").forEach(it =>
+      it.querySelector(".tick").textContent = it.dataset.mode === m ? "✓" : "");
+    tick();
+  }
+
+  const menuBtn = document.getElementById("menu-btn");
+  const menu = document.getElementById("menu");
+  menuBtn.addEventListener("click", e => { e.stopPropagation(); menu.classList.toggle("hidden"); });
+  document.addEventListener("click", () => menu.classList.add("hidden"));
+  menu.querySelectorAll(".menu-item").forEach(it =>
+    it.addEventListener("click", () => { menu.classList.add("hidden"); setMode(it.dataset.mode); }));
+
+  window.addEventListener("pywebviewready", () => setMode("live"));
 </script>
 </body>
 </html>

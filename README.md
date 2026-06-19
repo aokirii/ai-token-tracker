@@ -8,11 +8,13 @@ For Claude it pulls the **official** usage percentages (5-hour and 7-day rolling
 straight from Anthropic, so what you see matches your plan limits — not a guess. It also
 shows, **for Claude only**, how full the context window of each open Claude Code session
 is (one bar per session), and splits every Claude bar into **input / cache / output**
-token segments so you can see what your usage is made of.
+token segments so you can see what your usage is made of. A **☰ menu** (top-left) switches
+between this **live** view and an **offline** view that summarises your Claude token usage
+over the last day, week and month.
 For Codex it reads your local `~/.codex` login through the Codex app-server.
 
 ```
-AI Token Tracker
+☰  AI Token Tracker
 ┌────────────────────────────────────────────────┐
 │ ● Claude  PRO                             27%    │
 │ input 2% · cache 19% · output 6%                 │
@@ -35,6 +37,26 @@ AI Token Tracker
 └────────────────────────────────────────────────┘
 ```
 
+The **offline** view (☰ → Offline) summarises Claude token usage per window, each split the
+same way:
+
+```
+☰  AI Token Tracker
+┌────────────────────────────────────────────────┐
+│ Daily · 24h                     1,250,000 tokens │
+│ input 4% · cache 70% · output 26%                │
+│ ██░░████████████████████████████░░███████████░  │
+├────────────────────────────────────────────────┤
+│ Weekly · 7d                     8,400,000 tokens │
+│ input 3% · cache 71% · output 26%                │
+│ █░░█████████████████████████████░░███████████░  │
+├────────────────────────────────────────────────┤
+│ Monthly · 30d                  21,900,000 tokens │
+│ input 3% · cache 72% · output 25%                │
+│ █░░██████████████████████████████░░██████████░  │
+└────────────────────────────────────────────────┘
+```
+
 ## Features
 
 - **Live Claude usage** — official 5h / 7d utilization % and exact reset time.
@@ -44,6 +66,9 @@ AI Token Tracker
 - **Token-type breakdown** *(Claude only)* — every Claude bar (the 5h rate window and each
   session's context) is split into **input**, **cache**, and **output** colored segments
   that sum to the bar's fill, so you can see what your usage is made of.
+- **Live / Offline views** *(Claude only)* — a **☰ menu** toggles between the live dashboard
+  and an **offline** summary of your Claude token usage over the last day, week and month —
+  each with the same input / cache / output split. Offline is a snapshot, computed on demand.
 - **Live Codex usage** — Codex plan and rate-limit percentage from your local `~/.codex`
   session.
 - **Per-provider plan badge** next to each name — Claude and Codex can be auto-detected.
@@ -274,6 +299,14 @@ Every Claude bar — the 5h rate window and each session's context — is split 
 - Those proportions are scaled to the bar's fill, so the three segments always sum to the
   percent shown. `input` is usually small because most input gets cached (and so shows up
   under `cache`); `output` is what Claude generated.
+
+### Offline view (Claude only)
+
+The **☰ → Offline** view sums the same `input` / `cache-write` / `output` tokens (cache reads
+again excluded) across `~/.claude/projects/**/*.jsonl` over three rolling windows — the last
+**24h**, **7d** and **30d** — and shows each period's total with its input/cache/output split.
+It's computed on demand when you open it (not polled), so the heavier 30-day scan doesn't run
+while you're watching the live view.
 
 All of this is read-only and local — nothing here is sent anywhere.
 

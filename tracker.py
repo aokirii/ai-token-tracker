@@ -304,6 +304,46 @@ def claude_window_parts(window_hours):
     return parts
 
 
+def claude_history():
+    """Cumulative input / cache-write / output token totals over the last day,
+    week and month (cache reads excluded), for the offline history view. One pass
+    over the logs, dropping each token into every window it still falls inside."""
+    now = datetime.now(timezone.utc)
+    bounds = {
+        "daily": now - timedelta(days=1),
+        "weekly": now - timedelta(days=7),
+        "monthly": now - timedelta(days=30),
+    }
+    buckets = {k: {"input": 0, "cache": 0, "output": 0} for k in bounds}
+    month_cut = bounds["monthly"].timestamp()
+    for path in glob.glob(CLAUDE_GLOB, recursive=True):
+        try:
+            if os.path.getmtime(path) < month_cut:
+                continue
+            with open(path, encoding="utf-8") as f:
+                for line in f:
+                    try:
+                        d = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    ts = _parse_ts(d.get("timestamp"))
+                    u = (d.get("message") or {}).get("usage")
+                    if ts is None or not u:
+                        continue
+                    add = (u.get("input_tokens", 0),
+                           u.get("cache_creation_input_tokens", 0),
+                           u.get("output_tokens", 0))
+                    for key, cut in bounds.items():
+                        if ts >= cut:
+                            b = buckets[key]
+                            b["input"] += add[0]
+                            b["cache"] += add[1]
+                            b["output"] += add[2]
+        except OSError:
+            continue
+    return buckets
+
+
 def _model_from_settings(cwd):
     """The model string Claude Code is configured to use, read for the '[1m]'
     context-beta flag. Project settings (from the active session's cwd) override
@@ -559,6 +599,19 @@ def _scaled_parts(parts, pct):
     total = sum(parts.values()) or 1
     return [{"key": key, "pct": round(parts[key] / total * pct, 1)}
             for key in ("input", "cache", "output")]
+
+
+def _history_card(key, label, bucket):
+    """Offline history entry: a period's total tokens and its input/cache/output
+    split, each as a percent of that period's total (so the bar reads as a full
+    composition)."""
+    total = sum(bucket.values())
+    return {
+        "key": key,
+        "label": label,
+        "total_label": f"{_fmt_tokens(total)} tokens",
+        "parts": _scaled_parts(bucket, 100) if total else [],
+    }
 
 
 def _context_card(ctx):
@@ -938,6 +991,16 @@ class Api:
                 )
             out["providers"].append(card)
         return out
+
+    def get_history(self):
+        """Offline view: Claude token usage over the last day / week / month,
+        each split into input / cache / output. Computed on demand (not polled)."""
+        h = claude_history()
+        return {"periods": [
+            _history_card("daily", "Daily · 24h", h["daily"]),
+            _history_card("weekly", "Weekly · 7d", h["weekly"]),
+            _history_card("monthly", "Monthly · 30d", h["monthly"]),
+        ]}
 
 
 def main():
