@@ -5,9 +5,9 @@ Pulls Claude usage automatically:
   1. live: https://api.anthropic.com/api/oauth/usage (official 5h / 7d utilization %)
   2. cache: ~/.tokentracker/tracker/claude-usage-limits-cache.json
   3. jsonl: token estimate from ~/.claude/projects/**/*.jsonl
-Codex usage is pulled through the local Codex app-server and mirrored to YAML.
-Antigravity is manual for now (values come from config/config.yaml).
-The UI opens as a real desktop window via pywebview.
+Codex usage is pulled through the local Codex app-server. Codex gets the same
+token-type breakdown, per-session context bars, offline history and heatmap as
+Claude. The UI opens as a real desktop window via pywebview.
 """
 
 import base64
@@ -83,6 +83,7 @@ SESSIONS_DIR = os.path.expanduser(_paths["claude_sessions"])
 CODEX_HOME = _resolve_path(_paths["codex_home"])
 CODEX_AUTH = os.path.join(CODEX_HOME, "auth.json")
 CODEX_STATE_DB = os.path.join(CODEX_HOME, "state_5.sqlite")
+CODEX_SESSIONS_GLOB = os.path.join(CODEX_HOME, "sessions", "**", "*.jsonl")
 
 
 def load_config():
@@ -275,41 +276,30 @@ def claude_from_jsonl(window_hours):
     return total, resets_in
 
 
-def claude_window_parts(window_hours):
-    """input / cache-write / output token totals across all sessions in the last
-    window_hours (cache reads excluded), for the rate-window breakdown. Files with
-    no activity in the window are skipped by mtime."""
+# ---- Generic usage aggregation (provider-agnostic) ----
+# An "events" source is a callable events_fn(cutoff) that yields (ts, input, cache,
+# output) tuples for every usage record at or after cutoff, where the three token
+# counts already exclude each provider's noisy cache *reads*. The aggregators below
+# turn any such stream into the rate-window breakdown, the offline day/week/month
+# history, and the daily + hourly heatmaps — so every provider gets the same views.
+
+_WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+
+
+def _agg_window_parts(events_fn, window_hours):
+    """input / cache / output token totals over the last window_hours."""
     cutoff = datetime.now(timezone.utc) - timedelta(hours=window_hours)
-    cutoff_ts = cutoff.timestamp()
     parts = {"input": 0, "cache": 0, "output": 0}
-    for path in glob.glob(CLAUDE_GLOB, recursive=True):
-        try:
-            if os.path.getmtime(path) < cutoff_ts:
-                continue
-            with open(path, encoding="utf-8") as f:
-                for line in f:
-                    try:
-                        d = json.loads(line)
-                    except json.JSONDecodeError:
-                        continue
-                    ts = _parse_ts(d.get("timestamp"))
-                    if ts is None or ts < cutoff:
-                        continue
-                    u = (d.get("message") or {}).get("usage")
-                    if not u:
-                        continue
-                    parts["input"] += u.get("input_tokens", 0)
-                    parts["cache"] += u.get("cache_creation_input_tokens", 0)
-                    parts["output"] += u.get("output_tokens", 0)
-        except OSError:
-            continue
+    for _ts, inp, cac, out in events_fn(cutoff):
+        parts["input"] += inp
+        parts["cache"] += cac
+        parts["output"] += out
     return parts
 
 
-def claude_history():
-    """Cumulative input / cache-write / output token totals over the last day,
-    week and month (cache reads excluded), for the offline history view. One pass
-    over the logs, dropping each token into every window it still falls inside."""
+def _agg_history(events_fn):
+    """Cumulative input / cache / output totals over the last day, week and month,
+    in one pass, dropping each record into every window it still falls inside."""
     now = datetime.now(timezone.utc)
     bounds = {
         "daily": now - timedelta(days=1),
@@ -317,71 +307,32 @@ def claude_history():
         "monthly": now - timedelta(days=30),
     }
     buckets = {k: {"input": 0, "cache": 0, "output": 0} for k in bounds}
-    month_cut = bounds["monthly"].timestamp()
-    for path in glob.glob(CLAUDE_GLOB, recursive=True):
-        try:
-            if os.path.getmtime(path) < month_cut:
-                continue
-            with open(path, encoding="utf-8") as f:
-                for line in f:
-                    try:
-                        d = json.loads(line)
-                    except json.JSONDecodeError:
-                        continue
-                    ts = _parse_ts(d.get("timestamp"))
-                    u = (d.get("message") or {}).get("usage")
-                    if ts is None or not u:
-                        continue
-                    add = (u.get("input_tokens", 0),
-                           u.get("cache_creation_input_tokens", 0),
-                           u.get("output_tokens", 0))
-                    for key, cut in bounds.items():
-                        if ts >= cut:
-                            b = buckets[key]
-                            b["input"] += add[0]
-                            b["cache"] += add[1]
-                            b["output"] += add[2]
-        except OSError:
-            continue
+    for ts, inp, cac, out in events_fn(bounds["monthly"]):
+        for key, cut in bounds.items():
+            if ts >= cut:
+                b = buckets[key]
+                b["input"] += inp
+                b["cache"] += cac
+                b["output"] += out
     return buckets
 
 
-def _heatmap_daily(days_back):
-    """Total tokens (input + cache-write + output, cache reads excluded) per LOCAL
-    calendar day over the last days_back days."""
+def _agg_daily_totals(events_fn, days_back):
+    """Total tokens (input + cache + output) per LOCAL calendar day over the last
+    days_back days."""
     cutoff = datetime.now(timezone.utc) - timedelta(days=days_back)
-    cutoff_ts = cutoff.timestamp()
     totals = {}
-    for path in glob.glob(CLAUDE_GLOB, recursive=True):
-        try:
-            if os.path.getmtime(path) < cutoff_ts:
-                continue
-            with open(path, encoding="utf-8") as f:
-                for line in f:
-                    try:
-                        d = json.loads(line)
-                    except json.JSONDecodeError:
-                        continue
-                    ts = _parse_ts(d.get("timestamp"))
-                    u = (d.get("message") or {}).get("usage")
-                    if ts is None or ts < cutoff or not u:
-                        continue
-                    day = ts.astimezone().date().isoformat()
-                    totals[day] = totals.get(day, 0) + (
-                        u.get("input_tokens", 0)
-                        + u.get("cache_creation_input_tokens", 0)
-                        + u.get("output_tokens", 0))
-        except OSError:
-            continue
+    for ts, inp, cac, out in events_fn(cutoff):
+        day = ts.astimezone().date().isoformat()
+        totals[day] = totals.get(day, 0) + inp + cac + out
     return totals
 
 
-def claude_heatmap(weeks=12):
-    """GitHub-style daily-usage grid: `weeks` columns of 7 day-cells (Mon..Sun),
-    each at intensity level 0-4 by that day's total tokens. For the heatmap panel."""
+def _heatmap_grid(totals, weeks):
+    """GitHub-style daily grid: `weeks` columns of 7 day-cells (Mon..Sun), each at
+    intensity level 0-4 by that day's total tokens."""
     today = datetime.now().astimezone().date()
     start = today - timedelta(days=today.weekday() + 7 * (weeks - 1))
-    totals = _heatmap_daily((today - start).days + 1)
     peak = max(totals.values(), default=0)
     cols, day = [], start
     while day <= today:
@@ -399,15 +350,40 @@ def claude_heatmap(weeks=12):
     return {"weeks": cols, "total_label": _fmt_tokens(sum(totals.values()))}
 
 
-_WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+def _provider_heatmap(events_fn, weeks=12):
+    today = datetime.now().astimezone().date()
+    start = today - timedelta(days=today.weekday() + 7 * (weeks - 1))
+    totals = _agg_daily_totals(events_fn, (today - start).days + 1)
+    return _heatmap_grid(totals, weeks)
 
 
-def claude_hourly(weeks=12):
+def _agg_hourly(events_fn, weeks=12):
     """Punch-card: total tokens per (weekday, hour-of-day) in LOCAL time over the
     last `weeks`, at intensity level 0-4. Rows = Mon..Sun, cols = 0..23h."""
     cutoff = datetime.now(timezone.utc) - timedelta(weeks=weeks)
-    cutoff_ts = cutoff.timestamp()
     grid = [[0] * 24 for _ in range(7)]
+    for ts, inp, cac, out in events_fn(cutoff):
+        local = ts.astimezone()
+        grid[local.weekday()][local.hour] += inp + cac + out
+    peak = max((max(row) for row in grid), default=0)
+    rows = []
+    for wd in range(7):
+        cells = [{"hour": h, "total_label": _fmt_tokens(grid[wd][h]),
+                  "level": 0 if not (peak and grid[wd][h])
+                  else min(4, 1 + int(grid[wd][h] / peak * 3.999))}
+                 for h in range(24)]
+        rows.append({"day": _WEEKDAYS[wd], "cells": cells})
+    return {"rows": rows}
+
+
+# ---- Claude usage history / heatmap ----
+
+def claude_events(cutoff):
+    """(ts, input, cache-write, output) for every Claude usage record at or after
+    cutoff, across all session jsonls. Cache *reads* are excluded (they only
+    re-count the same history each turn). Files untouched since cutoff are skipped
+    by mtime."""
+    cutoff_ts = cutoff.timestamp()
     for path in glob.glob(CLAUDE_GLOB, recursive=True):
         try:
             if os.path.getmtime(path) < cutoff_ts:
@@ -419,25 +395,32 @@ def claude_hourly(weeks=12):
                     except json.JSONDecodeError:
                         continue
                     ts = _parse_ts(d.get("timestamp"))
-                    u = (d.get("message") or {}).get("usage")
-                    if ts is None or ts < cutoff or not u:
+                    if ts is None or ts < cutoff:
                         continue
-                    local = ts.astimezone()
-                    grid[local.weekday()][local.hour] += (
-                        u.get("input_tokens", 0)
-                        + u.get("cache_creation_input_tokens", 0)
-                        + u.get("output_tokens", 0))
+                    u = (d.get("message") or {}).get("usage")
+                    if not u:
+                        continue
+                    yield (ts, u.get("input_tokens", 0),
+                           u.get("cache_creation_input_tokens", 0),
+                           u.get("output_tokens", 0))
         except OSError:
             continue
-    peak = max((max(row) for row in grid), default=0)
-    rows = []
-    for wd in range(7):
-        cells = [{"hour": h, "total_label": _fmt_tokens(grid[wd][h]),
-                  "level": 0 if not (peak and grid[wd][h])
-                  else min(4, 1 + int(grid[wd][h] / peak * 3.999))}
-                 for h in range(24)]
-        rows.append({"day": _WEEKDAYS[wd], "cells": cells})
-    return {"rows": rows}
+
+
+def claude_window_parts(window_hours):
+    return _agg_window_parts(claude_events, window_hours)
+
+
+def claude_history():
+    return _agg_history(claude_events)
+
+
+def claude_heatmap(weeks=12):
+    return _provider_heatmap(claude_events, weeks)
+
+
+def claude_hourly(weeks=12):
+    return _agg_hourly(claude_events, weeks)
 
 
 def _model_from_settings(cwd):
@@ -1062,6 +1045,182 @@ def codex_auto(min_interval):
     return _codex_live["data"]
 
 
+# ---- Codex usage history / heatmap / context ----
+
+def codex_events(cutoff):
+    """(ts, input, cache, output) per Codex turn at or after cutoff, from the
+    rollout session logs. Each turn's incremental `last_token_usage` is used;
+    cached prompt tokens are excluded — like Claude's cache reads they only
+    re-count the same context each turn and would drown the rest. input = fresh
+    (uncached) prompt tokens, output = completion + reasoning. cache stays 0:
+    Codex exposes no cache-write count. Files untouched since cutoff are skipped."""
+    cutoff_ts = cutoff.timestamp()
+    for path in glob.glob(CODEX_SESSIONS_GLOB, recursive=True):
+        try:
+            if os.path.getmtime(path) < cutoff_ts:
+                continue
+            with open(path, encoding="utf-8") as f:
+                for line in f:
+                    try:
+                        d = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    if d.get("type") != "event_msg":
+                        continue
+                    payload = d.get("payload") or {}
+                    if payload.get("type") != "token_count":
+                        continue
+                    ts = _parse_ts(d.get("timestamp"))
+                    if ts is None or ts < cutoff:
+                        continue
+                    lu = (payload.get("info") or {}).get("last_token_usage") or {}
+                    inp = lu.get("input_tokens", 0) - lu.get("cached_input_tokens", 0)
+                    out = lu.get("output_tokens", 0) + lu.get("reasoning_output_tokens", 0)
+                    yield (ts, max(0, inp), 0, out)
+        except OSError:
+            continue
+
+
+def _read_codex_context(path, limit_cfg):
+    """Context fill of one Codex rollout: the last turn's prompt+response against
+    the model context window, plus the session-cumulative input/output composition
+    (cached prompt reads excluded). cwd/model come from the rollout itself. None
+    if the file has no token_count events. A positive limit_cfg pins the window;
+    otherwise the model_context_window reported in the log is used."""
+    last_lu = None
+    win = 0
+    cwd = ""
+    model = ""
+    parts = {"input": 0, "cache": 0, "output": 0}
+    try:
+        with open(path, encoding="utf-8") as f:
+            for line in f:
+                try:
+                    d = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                t = d.get("type")
+                payload = d.get("payload") or {}
+                if t == "session_meta":
+                    cwd = payload.get("cwd") or cwd
+                elif t == "turn_context":
+                    model = payload.get("model") or model
+                    cwd = payload.get("cwd") or cwd
+                elif t == "event_msg" and payload.get("type") == "token_count":
+                    info = payload.get("info") or {}
+                    last_lu = info.get("last_token_usage") or {}
+                    win = info.get("model_context_window") or win
+                    inp = last_lu.get("input_tokens", 0) - last_lu.get("cached_input_tokens", 0)
+                    out = last_lu.get("output_tokens", 0) + last_lu.get("reasoning_output_tokens", 0)
+                    parts["input"] += max(0, inp)
+                    parts["output"] += out
+    except OSError:
+        return None
+    if last_lu is None:
+        return None
+    used = last_lu.get("total_tokens", 0)
+    try:
+        pinned = int(limit_cfg)
+        limit = pinned if pinned > 0 else win
+    except (TypeError, ValueError):
+        limit = win
+    if not limit:
+        return None
+    return {
+        "used": used,
+        "limit": limit,
+        "pct": round(used / limit * 100, 1),
+        "model": model,
+        "project": _session_project(cwd),
+        "parts": parts,
+    }
+
+
+def _argv_is_codex_tui(argv):
+    """True if a process argv is an interactive Codex CLI (TUI), not the
+    `codex app-server` that token-tracker itself spawns for live data."""
+    if not argv or "app-server" in argv:
+        return False
+    if os.path.basename(argv[0]) == "codex":
+        return True
+    return any(a == "codex" or a.endswith("/codex") for a in argv[1:])
+
+
+def _codex_running():
+    """True if an interactive Codex session is currently running, False if none,
+    None if the platform can't tell (caller then falls back to recency only).
+    A Codex process reparented to init (its terminal/window closed) is treated as
+    not running, so a lingering ghost doesn't keep a context bar alive."""
+    if sys.platform.startswith("linux"):
+        for entry in os.listdir("/proc"):
+            if not entry.isdigit():
+                continue
+            try:
+                with open(f"/proc/{entry}/cmdline", "rb") as f:
+                    argv = [a.decode("utf-8", "replace") for a in f.read().split(b"\0") if a]
+            except OSError:
+                continue
+            if _argv_is_codex_tui(argv) and not _is_orphaned(int(entry)):
+                return True
+        return False
+    if sys.platform == "darwin":
+        try:
+            pids = subprocess.run(["pgrep", "-f", "codex"], capture_output=True,
+                                  text=True, timeout=4).stdout.split()
+        except (OSError, subprocess.SubprocessError):
+            return None
+        for pid in (p for p in pids if p.isdigit()):
+            try:
+                cmd = subprocess.run(["ps", "-o", "command=", "-p", pid],
+                                     capture_output=True, text=True, timeout=4).stdout
+            except (OSError, subprocess.SubprocessError):
+                continue
+            if _argv_is_codex_tui(cmd.split()):
+                return True
+        return False
+    return None
+
+
+def codex_contexts(limit_cfg, max_sessions=3, active_minutes=15):
+    """Context fill of the open Codex session(s), newest first. Codex has no
+    open-session registry, so a running `codex` process is the liveness signal:
+    once it exits no context bar is shown (no stale fallback to an old session).
+    Where running processes can't be inspected, falls back to the most recently
+    active rollout, then the single newest."""
+    running = _codex_running()
+    if running is False:
+        return []
+    files = []
+    for path in glob.glob(CODEX_SESSIONS_GLOB, recursive=True):
+        try:
+            files.append((os.path.getmtime(path), path))
+        except OSError:
+            continue
+    if not files:
+        return []
+    files.sort(reverse=True)
+    cutoff = time.time() - active_minutes * 60
+    paths = [p for m, p in files if m >= cutoff] or [files[0][1]]
+    out = []
+    for path in paths[:max_sessions]:
+        ctx = _read_codex_context(path, limit_cfg)
+        if ctx:
+            out.append(ctx)
+    return out
+
+
+def codex_window_parts(window_hours):
+    return _agg_window_parts(codex_events, window_hours)
+
+
+# Provider source -> normalized usage-event generator, for the offline history and
+# heatmap views. Providers without an event source (manual) are omitted from them.
+EVENT_SOURCES = {
+    "claude_auto": claude_events,
+    "codex_auto": codex_events,
+}
+
+
 class Api:
     """Bridge exposed to the pywebview frontend."""
 
@@ -1157,6 +1316,13 @@ class Api:
                         primary=f"{_fmt_tokens(used)} / {_fmt_tokens(limit)} tokens",
                         sub="codex unavailable", extra="", source="manual",
                     )
+                wparts = codex_window_parts(window_hours)
+                if sum(wparts.values()) > 0:
+                    card["parts"] = _scaled_parts(wparts, card.get("pct") or 0)
+                card["contexts"] = [
+                    _context_card(ctx)
+                    for ctx in codex_contexts(p.get("context_limit", "auto"),
+                                              p.get("context_sessions", 3))]
             else:
                 used, limit = p.get("used", 0), p.get("limit", 0) or 0
                 pct = round(used / limit * 100, 1) if limit else 0
@@ -1169,21 +1335,43 @@ class Api:
         return out
 
     def get_history(self):
-        """Offline view: Claude token usage over the last day / week / month,
-        each split into input / cache / output. Computed on demand (not polled)."""
-        h = claude_history()
-        return {"periods": [
-            _history_card("daily", "Daily · 24h", h["daily"]),
-            _history_card("weekly", "Weekly · 7d", h["weekly"]),
-            _history_card("monthly", "Monthly · 30d", h["monthly"]),
-        ]}
+        """Offline view: per-provider token usage over the last day / week / month,
+        each split into input / cache / output. Computed on demand (not polled).
+        Manual providers (no usage log) are omitted."""
+        cfg = load_config()
+        out = []
+        for p in cfg.get("providers", []):
+            events = EVENT_SOURCES.get(p.get("source"))
+            if not events:
+                continue
+            h = _agg_history(events)
+            out.append({
+                "name": p.get("name"),
+                "color": p.get("color", "#888"),
+                "periods": [
+                    _history_card("daily", "Daily · 24h", h["daily"]),
+                    _history_card("weekly", "Weekly · 7d", h["weekly"]),
+                    _history_card("monthly", "Monthly · 30d", h["monthly"]),
+                ],
+            })
+        return {"providers": out}
 
     def get_heatmap(self):
-        """Heatmap view: a GitHub-style grid of daily Claude token usage plus an
-        hour-of-day punch-card, over the last weeks. Computed on demand."""
-        data = claude_heatmap(12)
-        data["hourly"] = claude_hourly(12)
-        return data
+        """Heatmap view: per-provider GitHub-style grid of daily token usage plus an
+        hour-of-day punch-card, over the last weeks. Computed on demand. Manual
+        providers (no usage log) are omitted."""
+        cfg = load_config()
+        out = []
+        for p in cfg.get("providers", []):
+            events = EVENT_SOURCES.get(p.get("source"))
+            if not events:
+                continue
+            data = _provider_heatmap(events, 12)
+            data["hourly"] = _agg_hourly(events, 12)
+            data["name"] = p.get("name")
+            data["color"] = p.get("color", "#888")
+            out.append(data)
+        return {"providers": out}
 
 
 def main():

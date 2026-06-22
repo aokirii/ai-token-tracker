@@ -1,17 +1,16 @@
 # AI Token Tracker
 
-A small desktop panel that shows your **Claude**, **Codex**, and **Antigravity** token
+A small desktop panel that shows your **Claude** and **Codex** token
 usage at a glance. Built with [pywebview](https://pywebview.flowrl.com/) — a real native
 window with an HTML/CSS UI (no Electron).
 
 For Claude it pulls the **official** usage percentages (5-hour and 7-day rolling windows)
-straight from Anthropic, so what you see matches your plan limits — not a guess. It also
-shows, **for Claude only**, how full the context window of each open Claude Code session
-is (one bar per session), and splits every Claude bar into **input / cache / output**
-token segments so you can see what your usage is made of. A **☰ menu** (top-left) switches
-between three views: **live**, an **offline** summary of your Claude token usage over the last
-day / week / month, and a **heatmap** of daily and hour-of-day usage.
-For Codex it reads your local `~/.codex` login through the Codex app-server.
+straight from Anthropic, so what you see matches your plan limits — not a guess. For Codex it
+reads your local session through the Codex app-server. **For both providers** it shows how full
+the context window of each active session is (one bar per session) and splits each bar into
+**input / cache / output** token segments so you can see what your usage is made of. A **☰ menu**
+(top-left) switches between three views: **live**, an **offline** summary of token usage over the
+last day / week / month, and a **heatmap** of daily and hour-of-day usage — each shown per provider.
 
 ```
 ☰  AI Token Tracker
@@ -32,16 +31,19 @@ For Codex it reads your local `~/.codex` login through the Codex app-server.
 ├────────────────────────────────────────────────┤
 │ ● Codex  PLUS                             12%    │
 │ 12% · 5h window                      18.6.26: 4%│
-├────────────────────────────────────────────────┤
-│ ● Antigravity  FREE                        0%    │
+│ CONTEXT                                    48%   │
+│ input 40% · cache 0% · output 8%                 │
+│ ████████████████████░░░░░░░░░░░░░░░░░░░░░░░░░ │
+│ 124,000 / 258,000 tokens                  gpt-5 │
 └────────────────────────────────────────────────┘
 ```
 
-The **offline** view (☰ → Offline) summarises Claude token usage per window, each split the
-same way:
+The **offline** view (☰ → Offline) summarises each provider's token usage per window, each
+split the same way (one section per provider):
 
 ```
 ☰  AI Token Tracker
+● Claude
 ┌────────────────────────────────────────────────┐
 │ Daily · 24h                     1,250,000 tokens │
 │ input 4% · cache 70% · output 26%                │
@@ -58,10 +60,11 @@ same way:
 ```
 
 The **heatmap** view (☰ → Heatmap) shades daily usage over the last 12 weeks and an
-hour-of-day punch-card by intensity:
+hour-of-day punch-card by intensity — one grid per provider:
 
 ```
-☰ → Heatmap                          9,200,000 tokens
+☰ → Heatmap
+● Claude                             9,200,000 tokens
 
   Daily · last 12 weeks              less ·░▒▓█ more
     Mon  ░▓█▒▒█▒▓▓▒▓█
@@ -84,24 +87,23 @@ hour-of-day punch-card by intensity:
 
 ## Features
 
-- **Live Claude usage** — official 5h / 7d utilization % and exact reset time.
-- **Claude context window** *(Claude only)* — a separate bar per open Claude Code session
-  showing how full its context window is (tokens used / window size), with the session's
-  model. Open sessions are detected automatically, so each stays visible while it runs.
-- **Token-type breakdown** *(Claude only)* — every Claude bar (the 5h rate window and each
+- **Live usage, both providers** — Claude's official 5h / 7d utilization % and reset time;
+  Codex's plan and rate-limit % via the local app-server.
+- **Context window** *(both providers)* — a separate bar per active session showing how full
+  its context window is (tokens used / window size), with the session's model. Sessions are
+  detected automatically.
+- **Token-type breakdown** *(both providers)* — every bar (the rate/window bar and each
   session's context) is split into **input**, **cache**, and **output** colored segments
   that sum to the bar's fill, so you can see what your usage is made of.
-- **Live / Offline / Heatmap views** *(Claude only)* — a **☰ menu** switches between the live
-  dashboard, an **offline** summary of your Claude token usage over the last day / week / month
-  (same input / cache / output split), and a **heatmap** showing daily usage over the last 12
-  weeks plus an hour-of-day punch-card (weekday × hour). Offline and heatmap are snapshots,
-  computed on demand.
-- **Live Codex usage** — Codex plan and rate-limit percentage from your local `~/.codex`
-  session.
+- **Live / Offline / Heatmap views** *(both providers)* — a **☰ menu** switches between the
+  live dashboard, an **offline** per-provider summary of token usage over the last day / week /
+  month (same input / cache / output split), and a **heatmap** showing daily usage over the
+  last 12 weeks plus an hour-of-day punch-card (weekday × hour), one grid per provider. Offline
+  and heatmap are snapshots, computed on demand.
 - **Per-provider plan badge** next to each name — Claude and Codex can be auto-detected.
 - **Auto-refresh** with a network throttle (the UI polls often, the API is hit at most
   once per minute).
-- **Graceful fallback chain**: live API → official local cache → token estimate from logs.
+- **Graceful fallback chain** (Claude): live API → official local cache → token estimate from logs.
 - **Color-coded** — each percentage figure goes green < 70%, amber < 90%, red ≥ 90%.
 - **YAML config**, with user-specific settings kept in a separate, git-ignored file.
 
@@ -255,8 +257,8 @@ without editing anything — the keys below are only for customizing it.
 | `refresh_seconds` | How often the UI refreshes. |
 | `live_interval_seconds` | Minimum gap between live API calls. |
 | `providers[]` | Each provider's `name`, `color`, `source`, `plan`, and fallback `used` / `limit`. |
-| `providers[].context_limit` | *(Claude only)* Context-window size. `auto` reads the configured model for the `[1m]` beta, else assumes 200k and bumps to 1M once usage passes 200k. Or pin `200000` / `1000000`. |
-| `providers[].context_sessions` | *(Claude only)* Max number of open Claude sessions to show separate context bars for (default `3`). |
+| `providers[].context_limit` | Context-window size for the context bars. `auto` resolves it per provider (Claude reads the configured model for the `[1m]` beta, else 200k→1M; Codex reads the window reported in its logs). Or pin a number, e.g. `200000` / `1000000`. |
+| `providers[].context_sessions` | Max number of recent sessions to show separate context bars for (default `3`). Applies to `claude_auto` and `codex_auto`. |
 
 `source` is `claude_auto`, `codex_auto`, or `manual`.
 
@@ -297,7 +299,7 @@ For Claude, data is resolved in priority order:
 The live call is throttled by `live_interval_seconds`, so frequent UI refreshes don't spam
 the endpoint.
 
-### Claude context window (Claude only)
+### Claude context window (Claude)
 
 Separately from the rate windows above, each open Claude Code session gets its own context
 bar:
@@ -314,7 +316,7 @@ bar:
    any project settings); the `[1m]` beta means a 1M window, otherwise 200k. You can pin it
    with `context_limit`.
 
-### Token-type breakdown (Claude only)
+### Token-type breakdown (Claude)
 
 Every Claude bar — the 5h rate window and each session's context — is split into **input**,
 **cache**, and **output** segments:
@@ -327,7 +329,7 @@ Every Claude bar — the 5h rate window and each session's context — is split 
   percent shown. `input` is usually small because most input gets cached (and so shows up
   under `cache`); `output` is what Claude generated.
 
-### Offline view (Claude only)
+### Offline view (Claude)
 
 The **☰ → Offline** view sums the same `input` / `cache-write` / `output` tokens (cache reads
 again excluded) across `~/.claude/projects/**/*.jsonl` over three rolling windows — the last
@@ -335,7 +337,7 @@ again excluded) across `~/.claude/projects/**/*.jsonl` over three rolling window
 It's computed on demand when you open it (not polled), so the heavier 30-day scan doesn't run
 while you're watching the live view.
 
-### Heatmap view (Claude only)
+### Heatmap view (Claude)
 
 The **☰ → Heatmap** view buckets the same tokens (cache reads excluded) by **local** time into
 two grids, each cell shaded 0–4 by intensity relative to the busiest bucket:
@@ -349,23 +351,26 @@ Hover any cell for its date/hour and token total. Also computed on demand.
 
 All of this is read-only and local — nothing here is sent anywhere.
 
-For Codex, data is resolved in priority order:
+For Codex, the rate-limit % is resolved in priority order:
 
 1. **Live** — starts the local Codex app-server over stdio and reads `account/rateLimits/read`
    plus `account/usage/read`.
 2. **Local fallback** — decodes the plan from `~/.codex/auth.json` and reads local
    `state_5.sqlite` token totals when the app-server is unavailable.
 
-Codex usage is not written back to YAML; only the manual path and display settings live in
-the config files.
+The **context bars, token-type breakdown, offline and heatmap** for Codex are read from the
+rollout session logs under `~/.codex/sessions/**/*.jsonl`. Each turn's `token_count` event
+carries the input / cached / output counts and the model context window; the context bar shows
+the latest turn's prompt against that window, and cached prompt tokens are excluded from the
+breakdown (like Claude's cache reads). Codex usage is not written back to YAML.
 
 ## Limitations
 
-- **Antigravity is manual** for now — set `used`/`limit` in `config.yaml`.
 - Live Claude data stops when the OAuth token expires; run `claude` once to refresh it, and the
   app falls back to the cache in the meantime.
-- **Context bars are Claude-only.** Process-based detection of open sessions runs on Linux and
-  macOS; elsewhere it falls back to the most recently active session logs.
+- **Open-session detection differs by provider.** Claude detects genuinely-open sessions (via
+  its session registry, or process detection on Linux/macOS). Codex has no such registry, so its
+  context bars show the most recently active session(s) instead.
 - The `.desktop` launcher uses an absolute path; if you move the project, re-run `install.sh`.
 
 ## License

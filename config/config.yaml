@@ -19,14 +19,8 @@ providers:
     name: Codex
     source: codex_auto       # automatic: Codex app-server, local auth/state fallback
     plan: auto               # 'auto' = detect from ~/.codex auth; or set a fixed label
-    used: 0
-    limit: 100
+    used: 0                  # manual fallback only (used if the app-server is unavailable)
+    limit: 100               # manual fallback only
+    context_limit: auto      # context-window size: 'auto' (from the rollout's model_context_window), or pin a number
+    context_sessions: 3      # max number of recent Codex sessions to show context bars for
     color: "#10a37f"
-
-  - id: antigravity
-    name: Antigravity
-    source: manual
-    plan: free               # your Antigravity plan label
-    used: 0
-    limit: 1000000
-    color: "#4285f4"

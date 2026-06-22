@@ -113,6 +113,11 @@
   footer { text-align: center; font-size: 10.5px; color: var(--muted); margin-top: 8px; }
   .err { color: #e5645a; font-size: 12px; text-align: center; padding: 20px; }
   .hint { font-size: 10.5px; color: #e0a23c; margin-top: 6px; }
+  .prov-head {
+    display: flex; align-items: center; gap: 9px;
+    font-size: 13px; font-weight: 600; color: var(--text); margin: 2px 2px 9px;
+  }
+  .prov-head:not(:first-child) { margin-top: 18px; }
 
   .ctx { margin-top: 13px; padding-top: 12px; border-top: 1px solid var(--track); }
   .ctx-head {
@@ -207,23 +212,29 @@
   function renderHistory(data) {
     const root = document.getElementById("cards");
     root.innerHTML = "";
-    data.periods.forEach(p => {
-      const card = document.createElement("div");
-      card.className = "card";
-      card.innerHTML = `
-        <div class="row1">
-          <div class="name">${p.label}</div>
-          <div class="pct" style="font-size:15px">${p.total_label}</div>
-        </div>
-        ${p.parts.length ? `
-          <div class="ctx-parts">
-            ${p.parts.map(part => `<span class="seg-label"><span class="swatch" style="background:${partColor(part.key)}"></span><span style="color:${partColor(part.key)}">${part.key} ${part.pct}%</span></span>`).join("")}
+    (data.providers || []).forEach(prov => {
+      const head = document.createElement("div");
+      head.className = "prov-head";
+      head.innerHTML = `<span class="dot" style="background:${prov.color}"></span>${prov.name}`;
+      root.appendChild(head);
+      prov.periods.forEach(p => {
+        const card = document.createElement("div");
+        card.className = "card";
+        card.innerHTML = `
+          <div class="row1">
+            <div class="name">${p.label}</div>
+            <div class="pct" style="font-size:15px">${p.total_label}</div>
           </div>
-          <div class="bar stacked">
-            ${p.parts.map(part => `<div class="seg" style="width:${part.pct}%;background:${partColor(part.key)}"></div>`).join("")}
-          </div>`
-        : `<div class="row2"><span>no usage in this window</span></div>`}`;
-      root.appendChild(card);
+          ${p.parts.length ? `
+            <div class="ctx-parts">
+              ${p.parts.map(part => `<span class="seg-label"><span class="swatch" style="background:${partColor(part.key)}"></span><span style="color:${partColor(part.key)}">${part.key} ${part.pct}%</span></span>`).join("")}
+            </div>
+            <div class="bar stacked">
+              ${p.parts.map(part => `<div class="seg" style="width:${part.pct}%;background:${partColor(part.key)}"></div>`).join("")}
+            </div>`
+          : `<div class="row2"><span>no usage in this window</span></div>`}`;
+        root.appendChild(card);
+      });
     });
     document.getElementById("foot").textContent = "Offline · daily / weekly / monthly token usage";
   }
@@ -231,35 +242,37 @@
   function renderHeatmap(data) {
     const root = document.getElementById("cards");
     root.innerHTML = "";
-    const cols = data.weeks.map(week => `
-      <div class="hm-col">
-        ${week.map(cell => cell
-          ? `<div class="hm-cell hm-l${cell.level}" title="${cell.date} · ${cell.total_label} tokens"></div>`
-          : `<div class="hm-cell hm-empty"></div>`).join("")}
-      </div>`).join("");
-    const hhead = `<div class="hm-hrow"><span class="hm-day"></span>${
-      Array.from({length: 24}, (_, h) => `<span class="hm-hlabel">${h % 6 === 0 ? h : ""}</span>`).join("")}</div>`;
-    const hrows = (data.hourly ? data.hourly.rows : []).map(row => `
-      <div class="hm-hrow"><span class="hm-day">${row.day}</span>${
-        row.cells.map(c => `<div class="hm-cell hm-l${c.level}" title="${row.day} ${String(c.hour).padStart(2, "0")}:00 · ${c.total_label} tokens"></div>`).join("")}
-      </div>`).join("");
-    const card = document.createElement("div");
-    card.className = "card";
-    card.innerHTML = `
-      <div class="row1">
-        <div class="name">Heatmap</div>
-        <div class="pct" style="font-size:13px">${data.total_label} tokens</div>
-      </div>
-      <div class="ctx-head"><span class="label">Daily · last 12 weeks</span></div>
-      <div class="hm-grid">${cols}</div>
-      <div class="hm-legend"><span>less</span>
-        <span class="hm-cell hm-l0"></span><span class="hm-cell hm-l1"></span>
-        <span class="hm-cell hm-l2"></span><span class="hm-cell hm-l3"></span>
-        <span class="hm-cell hm-l4"></span><span>more</span>
-      </div>
-      <div class="ctx-head" style="margin-top:14px"><span class="label">By hour of day</span></div>
-      <div class="hm-hours">${hhead}${hrows}</div>`;
-    root.appendChild(card);
+    (data.providers || []).forEach(prov => {
+      const cols = prov.weeks.map(week => `
+        <div class="hm-col">
+          ${week.map(cell => cell
+            ? `<div class="hm-cell hm-l${cell.level}" title="${cell.date} · ${cell.total_label} tokens"></div>`
+            : `<div class="hm-cell hm-empty"></div>`).join("")}
+        </div>`).join("");
+      const hhead = `<div class="hm-hrow"><span class="hm-day"></span>${
+        Array.from({length: 24}, (_, h) => `<span class="hm-hlabel">${h % 6 === 0 ? h : ""}</span>`).join("")}</div>`;
+      const hrows = (prov.hourly ? prov.hourly.rows : []).map(row => `
+        <div class="hm-hrow"><span class="hm-day">${row.day}</span>${
+          row.cells.map(c => `<div class="hm-cell hm-l${c.level}" title="${row.day} ${String(c.hour).padStart(2, "0")}:00 · ${c.total_label} tokens"></div>`).join("")}
+        </div>`).join("");
+      const card = document.createElement("div");
+      card.className = "card";
+      card.innerHTML = `
+        <div class="row1">
+          <div class="name"><span class="dot" style="background:${prov.color}"></span>${prov.name}</div>
+          <div class="pct" style="font-size:13px">${prov.total_label} tokens</div>
+        </div>
+        <div class="ctx-head"><span class="label">Daily · last 12 weeks</span></div>
+        <div class="hm-grid">${cols}</div>
+        <div class="hm-legend"><span>less</span>
+          <span class="hm-cell hm-l0"></span><span class="hm-cell hm-l1"></span>
+          <span class="hm-cell hm-l2"></span><span class="hm-cell hm-l3"></span>
+          <span class="hm-cell hm-l4"></span><span>more</span>
+        </div>
+        <div class="ctx-head" style="margin-top:14px"><span class="label">By hour of day</span></div>
+        <div class="hm-hours">${hhead}${hrows}</div>`;
+      root.appendChild(card);
+    });
     document.getElementById("foot").textContent = "Heatmap · daily + hourly token usage";
   }
 
