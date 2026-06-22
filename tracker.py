@@ -39,6 +39,7 @@ _DEFAULT_PATHS = {
     "claude_projects_glob": "~/.claude/projects/**/*.jsonl",
     "claude_usage_cache": "~/.tokentracker/tracker/claude-usage-limits-cache.json",
     "claude_settings": "~/.claude/settings.json",
+    "claude_sessions": "~/.claude/sessions",
     "codex_home": "~/.codex",
     "codex_binary": "",
 }
@@ -78,6 +79,7 @@ CLAUDE_GLOB = os.path.expanduser(_paths["claude_projects_glob"])
 CLAUDE_CACHE = os.path.expanduser(_paths["claude_usage_cache"])
 CLAUDE_CREDS = os.path.expanduser(_paths["claude_credentials"])
 CLAUDE_SETTINGS = os.path.expanduser(_paths["claude_settings"])
+SESSIONS_DIR = os.path.expanduser(_paths["claude_sessions"])
 CODEX_HOME = _resolve_path(_paths["codex_home"])
 CODEX_AUTH = os.path.join(CODEX_HOME, "auth.json")
 CODEX_STATE_DB = os.path.join(CODEX_HOME, "state_5.sqlite")
@@ -656,29 +658,109 @@ def _paths_for_open_cwds(files, open_procs):
     return chosen
 
 
+def _pid_is_live_claude(pid, want_start=""):
+    """True if `pid` is still a running Claude Code process. On Linux the registry's
+    procStart (raw /proc starttime ticks) is matched against the live process to
+    reject PID reuse; elsewhere a bare liveness check is used, which is enough
+    because the registry file is removed on a clean exit."""
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True  # exists, owned by another user
+    except (OSError, TypeError):
+        return False
+    if sys.platform.startswith("linux"):
+        try:
+            with open(f"/proc/{pid}/stat", "rb") as f:
+                after_comm = f.read().rpartition(b")")[2].split()
+            ticks = after_comm[19].decode()  # field 22 (starttime), after comm
+        except (OSError, IndexError):
+            return True  # alive but unverifiable: accept
+        if want_start and want_start != ticks:
+            return False  # pid was reused by a different process
+    return True
+
+
+def _is_orphaned(pid):
+    """True if `pid` was reparented to init / the systemd user manager because the
+    terminal that launched it closed — i.e. the session's window is gone even though
+    the `claude` process lingers in the background. Linux-only (via /proc); False
+    elsewhere, where this can't be told and real sessions must not be hidden."""
+    if not sys.platform.startswith("linux"):
+        return False
+    try:
+        with open(f"/proc/{pid}/stat", "rb") as f:
+            ppid = int(f.read().rpartition(b")")[2].split()[1])  # field 4 (ppid)
+    except (OSError, IndexError, ValueError):
+        return False
+    if ppid <= 1:
+        return True  # adopted by init (e.g. launchd-style / no systemd subreaper)
+    try:
+        with open(f"/proc/{ppid}/comm", encoding="utf-8") as f:
+            return f.read().strip() == "systemd"  # reparented to the user manager
+    except OSError:
+        return False
+
+
+def _live_session_paths(jsonl_by_id):
+    """Session jsonls of the currently-open Claude Code sessions, from the
+    authoritative ~/.claude/sessions/<pid>.json registry each live process writes
+    (and removes on exit). Newest activity first. Returns None when the registry
+    dir is absent (older Claude Code), so the caller falls back to process+mtime
+    detection; an empty list means the registry is present and nothing is open."""
+    if not os.path.isdir(SESSIONS_DIR):
+        return None
+    entries = []
+    for name in os.listdir(SESSIONS_DIR):
+        if not name.endswith(".json"):
+            continue
+        try:
+            with open(os.path.join(SESSIONS_DIR, name), encoding="utf-8") as f:
+                reg = json.load(f)
+        except (OSError, json.JSONDecodeError):
+            continue
+        pid, sid = reg.get("pid"), reg.get("sessionId")
+        path = jsonl_by_id.get(sid)
+        if not pid or not path:
+            continue
+        if not _pid_is_live_claude(pid, str(reg.get("procStart") or "")):
+            continue  # process gone (clean exit) or a crashed-stale / reused entry
+        if _is_orphaned(pid):
+            continue  # process lingers but its terminal/window is gone (abandoned)
+        order = reg.get("statusUpdatedAt") or reg.get("startedAt") or 0
+        entries.append((order, path))
+    entries.sort(reverse=True)
+    return [p for _, p in entries]
+
+
 def claude_contexts(limit_cfg, max_sessions=3, active_minutes=15):
     """Context fill of each open Claude Code session, newest first. Open sessions
-    are detected from running `claude` processes, so each stays visible as long as
-    its process lives — even while idle. When the platform can't report processes
-    (or none match a session yet), falls back to jsonls written in the last
-    active_minutes, then to the single newest, so the gauge never disappears."""
+    come from the ~/.claude/sessions registry (exact pid->session mapping), so a
+    closed tab disappears immediately and an idle-but-open one still shows. On
+    older Claude Code without that registry, falls back to detecting running
+    `claude` processes, then to jsonls written in the last active_minutes, then to
+    the single newest, so the gauge never disappears."""
     files = []
+    jsonl_by_id = {}
     for path in glob.glob(CLAUDE_GLOB, recursive=True):
         try:
             files.append((os.path.getmtime(path), path))
         except OSError:
             continue
+        jsonl_by_id[os.path.splitext(os.path.basename(path))[0]] = path
     if not files:
         return []
     files.sort(reverse=True)
 
-    paths = None
-    open_procs = _open_session_cwds()
-    if open_procs:
-        paths = _paths_for_open_cwds(files, open_procs)
-    if not paths:  # detection unavailable or nothing matched: mtime fallback
-        cutoff = time.time() - active_minutes * 60
-        paths = [p for m, p in files if m >= cutoff] or [files[0][1]]
+    paths = _live_session_paths(jsonl_by_id)  # authoritative registry, or None
+    if paths is None:  # older Claude Code: process detection, then mtime fallback
+        open_procs = _open_session_cwds()
+        paths = _paths_for_open_cwds(files, open_procs) if open_procs else None
+        if not paths:
+            cutoff = time.time() - active_minutes * 60
+            paths = [p for m, p in files if m >= cutoff] or [files[0][1]]
 
     out = []
     for path in paths[:max_sessions]:
