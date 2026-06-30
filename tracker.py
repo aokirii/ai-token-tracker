@@ -1221,8 +1221,62 @@ EVENT_SOURCES = {
 }
 
 
+# --- low-quota alert ---------------------------------------------------------
+# When a provider's remaining quota drops to/below `alert_remaining_pct` (config,
+# default 20%), fire one OS-native desktop notification. It re-arms only after
+# the provider climbs back above the threshold (e.g. once the window resets), so
+# a single low-quota episode notifies once — not on every refresh.
+
+def _notify_os(title, message):
+    """Best-effort cross-platform desktop notification. Never raises: a missing
+    notifier (headless box, WSL without a notification daemon, etc.) is silently
+    ignored. Launched detached so it never blocks the refresh."""
+    title = str(title).replace('"', "").replace("'", "")
+    message = str(message).replace('"', "").replace("'", "")
+    try:
+        if sys.platform == "darwin":
+            subprocess.Popen(
+                ["osascript", "-e",
+                 f'display notification "{message}" with title "{title}"'])
+        elif sys.platform == "win32":
+            ps = (
+                "Add-Type -AssemblyName System.Windows.Forms,System.Drawing;"
+                "$n=New-Object System.Windows.Forms.NotifyIcon;"
+                "$n.Icon=[System.Drawing.SystemIcons]::Warning;"
+                f"$n.BalloonTipTitle='{title}';$n.BalloonTipText='{message}';"
+                "$n.Visible=$true;$n.ShowBalloonTip(6000);"
+                "Start-Sleep -Seconds 6;$n.Dispose()")
+            subprocess.Popen(
+                ["powershell", "-NoProfile", "-WindowStyle", "Hidden",
+                 "-Command", ps])
+        else:  # linux / WSL
+            subprocess.Popen(["notify-send", "-u", "critical", title, message])
+    except (OSError, subprocess.SubprocessError):
+        pass
+
+
 class Api:
     """Bridge exposed to the pywebview frontend."""
+
+    def __init__(self):
+        # provider name -> currently inside the low-quota zone (debounce state,
+        # so the notification fires on entry, not on every poll).
+        self._low_quota = {}
+
+    def _check_quota_alerts(self, providers, cfg):
+        """Fire one OS notification per provider the moment its remaining quota
+        first drops to/below the configured threshold; re-arm on recovery."""
+        threshold = cfg.get("alert_remaining_pct", 20)
+        if not isinstance(threshold, (int, float)) or threshold <= 0:
+            return  # alerting disabled
+        for p in providers:
+            name = p.get("name") or "?"
+            remaining = 100 - (p.get("pct") or 0)
+            low = remaining <= threshold
+            if low and not self._low_quota.get(name):
+                _notify_os("AI Token Tracker",
+                           f"{name} limit %{max(0, round(remaining))} kaldı")
+            self._low_quota[name] = low
 
     def get_data(self):
         cfg = load_config()
@@ -1332,6 +1386,7 @@ class Api:
                     sub="manual", extra="", source="manual",
                 )
             out["providers"].append(card)
+        self._check_quota_alerts(out["providers"], cfg)
         return out
 
     def get_history(self):

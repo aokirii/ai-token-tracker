@@ -4,6 +4,7 @@
 window_hours: 5            # rolling window length (Claude Pro plan = 5h)
 refresh_seconds: 30        # how often the UI refreshes
 live_interval_seconds: 60  # lower bound for live API calls (network hit at most once per this)
+alert_remaining_pct: 20    # low-quota alert: fire one OS notification when a provider's remaining quota drops to/below this %. Set 0 to disable.
 
 providers:
   - id: claude
